@@ -7,7 +7,7 @@
 ;              SYNC_SERIAL is defined), byte orientated (1 start,     *
 ;              8 data, no parity, 1 stop) serial interface.           *
 ;              Actual reception and transmission is achieved by       *
-;              'service' subroutines.  Except when 'synchronous'      *
+;              'service' subroutines.  Except when synchronous        *
 ;              exchange is taking place these will be called more     *
 ;              than once for each bit, i.e. if called as part of a    *
 ;              10 KHz interrupt and running at 5K baud each routine   *
@@ -16,19 +16,8 @@
 ;              significant bit' first, 0 equals line high, and 1      *
 ;              equals line low.                                       *
 ;                                                                     *
-;    SerInit   - Initialise serial interface.                         *
-;    EnableRx  - Enable receive hardware.                             *
-;    EnableTx  - Enable transmit hardware.                            *
-;    InitRx    - Initialise receivesoftware.                          *
-;    InitTx    - Initialise transmit software.                        *
-;    ServiceRx - Service actual receptions of data.                   *
-;    ServiceTx - Service actual transmission of data.                 *
-;    BreakTx   - Transmit a 'break' signal.                           *
-;    SerialRx  - Get most recently received byte, if available.       *
-;    SerialTx  - Start transmission of byte, if transmitter not busy. *
-;                                                                     *
-;    Author:    Chris White (whitecf@bcs.org.uk)                      *
-;    Company:   Monitor Computing Services Ltd.                       *
+;    Author:   Chris White (whitecf@bcs.org.uk)                       *
+;    Company:  Monitor Computing Services Ltd.                        *
 ;                                                                     *
 ;**********************************************************************
 ;                                                                     *
@@ -53,6 +42,24 @@
 ;       USA.                                                          *
 ;                                                                     *
 ;**********************************************************************
+;                                                                     *
+;  These macros do not employ 'returns' and so their instances can be *
+;  employed 'inline':                                                 *
+;                                                                     *
+;    SerInit   - Initialise serial interface.                         *
+;    EnableRx  - Enable receive hardware.                             *
+;    EnableTx  - Enable transmit hardware.                            *
+;    InitRx    - Initialise receivesoftware.                          *
+;    InitTx    - Initialise transmit software.                        *
+;                                                                     *
+;  These macros employ 'returns' and so their instances must be       *
+;  invoked as subroutine calls:                                       *
+;                                                                     *
+;    ServiceRx - Service actual receptions of data.                   *
+;    ServiceTx - Service actual transmission of data.                 *
+;    BreakTx   - Transmit a 'break' signal.                           *
+;    SerialRx  - Get most recently received byte, if available.       *
+;    SerialTx  - Start transmission of byte, if transmitter not busy. *
 ;                                                                     *
 ; Each instance of a serial interface requires -                      *
 ;                                                                     *
