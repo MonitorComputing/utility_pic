@@ -22,7 +22,7 @@
 ;                                                                     *
 ;**********************************************************************
 ;                                                                     *
-;    Copyright (C) 2005  Monitor Computing Services Ltd.              *
+;    Copyright (C) 2011  Monitor Computing Services Ltd.              *
 ;                                                                     *
 ;    This program is free software; you can redistribute it and/or    *
 ;    modify it under the terms of the GNU General Public License      *
@@ -88,6 +88,7 @@
 ;            RXFLAG      - Receive byte buffer 'full' status bit      *
 ;            RXERR       - Receive error status bit                   *
 ;            RXBREAK     - Received 'break' status bit                *
+;            RXSTOP      - Seeking stop bit                           *
 ;     Transmit:                                                       *
 ;            TXBIT       - Transmit port bit to use                   *
 ;            CYCTXBIT    - Number of cycles per bit                   *
@@ -235,7 +236,7 @@ EnableTx    macro   TXTRIS, txPort, TXBIT
 ;            RXBREAK - Received 'break' status bit                    *
 ;                                                                     *
 ;**********************************************************************
-InitRx      macro   rxTimer, rxStat, RXFLAG, RXERR, RXBREAK
+InitRx      macro   rxTimer, rxStat, RXFLAG, RXERR, RXBREAK, RXSTOP
 
 #ifndef SYNC_SERIAL
         clrf    rxTimer
@@ -243,6 +244,7 @@ InitRx      macro   rxTimer, rxStat, RXFLAG, RXERR, RXBREAK
         bcf     rxStat,RXFLAG   ; Clear Rx byte 'loaded' flag.
         bcf     rxStat,RXERR    ; Clear the Rx error flag.
         bcf     rxStat,RXBREAK  ; Clear the received 'break' flag.
+        bcf     rxStat,RXSTOP   ; Seeking stop bit
 
         endm
 
@@ -291,18 +293,22 @@ InitTx      macro   txTimer, txStat, TXFLAG
 ;                RX_BUSY, receiving data.                             *
 ;                                                                     *
 ;**********************************************************************
-ServiceRx   macro   rxTimer, rxPort, RXBIT, rxBitCount, CYCRXINI, rxStat, RXERR, RXBREAK, rxReg, rxByte, RXFLAG, CYCRXBIT
+ServiceRx   macro   rxTimer, rxPort, RXBIT, rxBitCount, CYCRXINI, rxStat, RXERR, RXBREAK, RXSTOP, rxReg, rxByte, RXFLAG, CYCRXBIT
 
-        local   BeginRx, ContinueRx, EndRx, StoreRx, RxDataBit
+        local   BeginRx, ContinueRx, SeekStopBit, EndRx, StoreRx, RxDataBit
+
+        ; Check to see if currently seeking stop bit.
+        btfsc   rxStat,RXSTOP   ; Test the seeking stop flag, skip if clear ...
+        goto    SeekStopBit     ; ... else jump (seeking stop bit).
 
         ; Check to see if currently receiving a byte.
         movf    rxBitCount,F    ; Test Rx bit count.
         btfss   STATUS,Z        ; Skip if zero (no Rx in progress) ...
-        goto    ContinueRx      ; ... otherwise jump (Rx in progress).
+        goto    ContinueRx      ; ... else jump (Rx in progress).
 
         ; Not receiving, look for start of Rx byte.
         btfss   rxPort,RXBIT    ; Skip if start bit detected ...
-        retlw   RX_IDLE         ; ... otherwise return.
+        retlw   RX_IDLE         ; ... else return.
 
         ; Seen start of Rx byte.
         bcf     rxStat,RXBREAK  ; Clear the received 'break' status flag.
@@ -322,46 +328,43 @@ ContinueRx
         ; If not performing 'synchronous' reception test if time to sample
         ; next bit of received data.
         decfsz  rxTimer,F       ; Decrement bit cycle count, skip if zero ...
-        retlw   RX_BUSY         ; ... otherwise return.
+        retlw   RX_BUSY         ; ... else return.
 #endif
         ; Test if all data bits have been received.
         decfsz  rxBitCount,F    ; Decrement Rx bit count, skip if zero ...
-        goto    RxDataBit       ; ... otherwise jump to sample data bit.
+        goto    RxDataBit       ; ... else jump to sample data bit.
 
+        bsf     rxStat,RXSTOP   ; Set seeking stop bit flag.
+
+SeekStopBit
         ; Sample the input expecting to see a stop bit.
         btfss   rxPort,RXBIT    ; Test input for 'stop' bit, skip if set ...
-        goto    EndRx           ; ... otherwise jump (received the stop bit).
+        goto    EndRx           ; ... else jump (received the stop bit).
 
         ; No stop bit found, it might be that a 'break' is being transmitted
         ; or something has caused lose of synchronisation with transmitter.
         btfsc   rxStat,RXERR    ; Test the Rx error flag, skip if clear ...
-        bsf     rxStat,RXBREAK  ; ... otherwise must be receiving a 'break'.
+        bsf     rxStat,RXBREAK  ; ... else must be receiving a 'break'.
 
         bsf     rxStat,RXERR    ; Set the Rx error flag.
 
-        ; Keep looking for a stop bit.
-
-        incf    rxBitCount,F    ; Set Rx bit count for one more bit.
-#ifndef SYNC_SERIAL
-        ; If not performing 'synchronous' reception ensure Rx input is sampled
-        ; next time this subroutine is called.
-        incf    rxTimer,F       ; Set bit cycle count to 1.
-#endif
-
         btfsc   rxStat,RXBREAK  ; Skip if the 'break' flag is not set ...
-        retlw   RX_BRK          ; ... otherwise return 'receiving break' ...
-        retlw   RX_BUSY         ; ... else just return 'receive busy'.
+        retlw   RX_BRK          ; ... else return 'receiving break' ...
+        retlw   RX_IDLE         ; ... else just return 'receive idle'.
 
 EndRx
-        ; Stop bit seen, reception of a byte is complete, test to see it can
-        ; be saved, i.e. previously received byte is no longer being used.
+        ; Stop bit seen.
+        bcf     rxStat,RXSTOP   ; Clear seeking stop bit flag.
+
+        ; Reception of a byte is complete, test to see it can be saved,
+        ; i.e. previously received byte is no longer being used.
         btfsc   rxStat,RXFLAG   ; Skip if Rx buffer 'full' flag is clear ...
-        retlw   RX_BUSY         ; ... otherwise return.
+        retlw   RX_BUSY         ; ... else return.
 
         ; Rx buffer is not in use, the received byte can be saved but first
         ; check there were no errors during reception of the byte.
         btfss   rxStat,RXERR    ; Skip if the error flag is set ...
-        goto    StoreRx         ; ... otherwise jump.
+        goto    StoreRx         ; ... else jump.
 
         ; Reception of a byte has been completed but there was an error.  Clear
         ; the error condition but throw away the received byte.
@@ -429,11 +432,11 @@ ServiceTx   macro   txTimer, txStat, txByte, txReg, TXFLAG, txBitCount, CYCTXBIT
         ; Check to see if currently transmitting a byte
         movf    txBitCount,F    ; Test Tx bit count
         btfss   STATUS,Z        ; Skip if zero (no Tx in progress) ...
-        goto    ContinueTx      ; ... otherwise jump (Tx in progress).
+        goto    ContinueTx      ; ... else jump (Tx in progress).
 
         ; Not transmitting, check to see if a byte is waiting to be sent.
         btfsc   txStat,TXFLAG   ; Test Tx byte 'clear' flag skip if not set ...
-        retlw   TX_IDLE         ; ... otherwise return (nothing to transmit)
+        retlw   TX_IDLE         ; ... else return (nothing to transmit)
 
         ; Start transmitting byte
         bsf     txPort,TXBIT    ; Set Tx output for start bit.
@@ -458,11 +461,11 @@ ContinueTx
         ; If not performing 'synchronous' transmission test if time to send
         ; next bit of transmit data.
         decfsz  txTimer,F       ; Decrement bit cycle count, skip if zero ...
-        retlw   TX_BUSY         ; ... otherwise return.
+        retlw   TX_BUSY         ; ... else return.
 #endif
         ; Test if all bits have been transmitted.
         decfsz  txBitCount,F    ; Decrement Tx bit count, skip if zero ...
-        goto    TxNextBit       ; ... otherwise jump.
+        goto    TxNextBit       ; ... else jump.
 
         ; Transmission complete, nothing else needs to be done.
         retlw   TX_BUSY
@@ -531,7 +534,7 @@ BreakTx     macro   txTimer, txBitCount, CYCTXBIT, txPort, TXBIT
         ; Check to see if currently sending 'break'
         movf    txBitCount,F    ; Test Tx bit count
         btfss   STATUS,Z        ; Skip if zero (no 'break' in progress) ...
-        goto    ContinueTx      ; ... otherwise jump ('break' in progress).
+        goto    ContinueTx      ; ... else jump ('break' in progress).
 
         ; Start sending 'break'
         bsf     txPort,TXBIT    ; Set Tx output bit.
@@ -548,11 +551,11 @@ BreakTx     macro   txTimer, txBitCount, CYCTXBIT, txPort, TXBIT
 ContinueBreak
         ; Sending of 'break' is in progress, test if time to send next bit.
         decfsz  txTimer,F       ; Decrement bit cycle count, skip if zero ...
-        retlw   TX_BUSY         ; ... otherwise return.
+        retlw   TX_BUSY         ; ... else return.
 
         ; Test if all bits have been sent.
         decfsz  txBitCount,F    ; Decrement Tx bit count, skip if zero ...
-        goto    ReloadBitTimer  ; ... otherwise jump.
+        goto    ReloadBitTimer  ; ... else jump.
 
         ; Transmission complete, nothing else needs to be done.
         bcf     txPort,TXBIT    ; Clear Tx output bit.
@@ -586,7 +589,7 @@ SerialRx        macro   rxStat, RXFLAG, rxByte
         bcf     STATUS,Z        ; Set default return status of no Rx data.
 
         btfss   rxStat,RXFLAG   ; Skip if Rx buffer 'loaded' flag is set ...
-        return                  ; ... otherwise return (receive buffer empty).
+        return                  ; ... else return (receive buffer empty).
 
         movf    rxByte,W        ; Load W from the Rx buffer.
         bcf     rxStat,RXFLAG   ; Clear the Rx buffer 'loaded' flag.
@@ -614,7 +617,7 @@ SerialTx        macro   txStat, TXFLAG, txByte
 
         bcf     STATUS,Z        ; Set default return status of no Tx performed.
         btfss   txStat,TXFLAG   ; Skip if Tx buffer 'clear' flag is set ...
-                return          ; ... otherwise return (transmit buffer full).
+                return          ; ... else return (transmit buffer full).
 
         movf    FSR,W           ; Copy Tx byte into ...
         movwf   txByte          ; ... Tx buffer
