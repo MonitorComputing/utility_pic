@@ -289,7 +289,7 @@ InitTx      macro   txTimer, txStat, TXFLAG
 ;            RXFLAG     - Receive byte buffer 'loaded' status bit     *
 ;            CYCRXBIT   - Number of cycles per bit                    *
 ;                                                                     *
-; Return   : W - RX_IDLE, not currently receiving any data.           *
+; Return   : W - RX_IDLE, not receiving any data.                     *
 ;                RX_BUSY, receiving data.                             *
 ;                                                                     *
 ;**********************************************************************
@@ -359,7 +359,8 @@ EndRx
         ; Reception of a byte is complete, test to see it can be saved,
         ; i.e. previously received byte is no longer being used.
         btfsc   rxStat,RXFLAG   ; Skip if Rx buffer 'full' flag is clear ...
-        retlw   RX_BUSY         ; ... else return.
+        retlw   RX_IDLE         ; ... else return (received byte discarded).
+
 
         ; Rx buffer is not in use, the received byte can be saved but first
         ; check there were no errors during reception of the byte.
@@ -369,7 +370,7 @@ EndRx
         ; Reception of a byte has been completed but there was an error.  Clear
         ; the error condition but throw away the received byte.
         bcf     rxStat,RXERR    ; Clear error flag.
-        retlw   RX_BUSY         ; Return (received byte ignored).
+        retlw   RX_IDLE         ; Return (received byte discarded).
 
 StoreRx
         ; Reception of a byte has been completed without any error so store
@@ -377,7 +378,7 @@ StoreRx
         movf    rxReg,W         ; Copy the byte from the shift register ...
         movwf   rxByte          ; ... into the Rx buffer.
         bsf     rxStat,RXFLAG   ; Set the Rx buffer 'full' flag.
-        retlw   RX_BUSY         ; Return.
+        retlw   RX_IDLE         ; Return.
 
 RxDataBit
         ; Sample next bit of received data.  This is done by shifting the
@@ -534,7 +535,7 @@ BreakTx     macro   txTimer, txBitCount, CYCTXBIT, txPort, TXBIT
         ; Check to see if currently sending 'break'
         movf    txBitCount,F    ; Test Tx bit count
         btfss   STATUS,Z        ; Skip if zero (no 'break' in progress) ...
-        goto    ContinueTx      ; ... else jump ('break' in progress).
+        goto    ContinueBreak   ; ... else jump ('break' in progress).
 
         ; Start sending 'break'
         bsf     txPort,TXBIT    ; Set Tx output bit.
