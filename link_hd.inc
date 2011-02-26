@@ -34,20 +34,44 @@
 ;**********************************************************************
 
 
+; lnkState - Link state register
+;   bit 0,3 - Current state
+;     0 - Switching to Rx
+;     1 - Waiting for interface to 'settle'
+;     2 - Rx Idle
+;     3 - Receiving data
+;     4 - Switching to Tx
+;     5 - Waiting for far end to 'turn around'
+;     6 - Waiting for interface to 'settle'
+;     7 - Dummy state, go to Tx Idle
+;     8 - Tx idle
+;     9 - Transmiting data
+;   bit 4,5 - Unused
+;   bit 6   - Rx idle timedout without receiving any data
+;   bit 7   - Required direction, set = Tx, clear = Rx
+
 ; Rx states
-SWITCH2RXSTATE  EQU     0
-RXSETTLESTATE   EQU     1
-RXIDLESTATE     EQU     2
-RXSTATE         EQU     3
-; Tx states (must start on even number for TXSTATEMASK to work)
-SWITCH2TXSTATE  EQU     4
-TXTURNSTATE     EQU     5
-TXSETTLESTATE   EQU     6
-TXIDLESTATE     EQU     7
-TXSTATE         EQU     8
+SWITCH2RXSTATE  EQU     0   ; Switching to Rx
+RXSETTLESTATE   EQU     1   ; Waiting for interface to 'settle'
+RXIDLESTATE     EQU     2   ; Rx Idle
+RXSTATE         EQU     3   ; Receiving data
 
-TXSTATEMASK     EQU     B'11111100'
+RXACTVMASK      EQU     B'00000010' ; Mask to test for in active Rx state
 
+; Tx states
+SWITCH2TXSTATE  EQU     4   ; Switching to Tx
+TXTURNSTATE     EQU     5   ; Waiting for far end to 'turn around'
+TXSETTLESTATE   EQU     6   ; Waiting for interface to 'settle'
+TXDMYSTATE      EQU     7   ; Dummy state, go to Tx Idle
+TXIDLESTATE     EQU     8   ; Tx idle
+TXSTATE         EQU     9   ; Transmiting data
+
+TXACTVMASK      EQU     B'00001000' ; Mask to test for in active Tx state
+
+LNKSTTEMASK     EQU     B'00001111' ; Mask to isolate state value
+
+LNKTMOFLAG      EQU     6   ; Link Rx idle timedout status bit
+LNKDIRFLAG      EQU     7   ; Required direction bit, set = Tx, clear = Rx
 
 ;**********************************************************************
 ;                                                                     *
@@ -57,8 +81,9 @@ TXSTATEMASK     EQU     B'11111100'
 ;                                                                     *
 ; Arguments: ServiceRx - Subroutine to service physical Rx            *
 ;            ServiceTx - Subroutine to service physical Tx            *
-;            lnkSte    - Link's state machine state variable          *
+;            lnkState  - Link's state machine state variable          *
 ;            LINKDELAY - Delay value to be used in link timing delays *
+;            LINKTMOUT - Delay value to timeout if no data received   *
 ;            dlyTmr    - Link's delay timing variable                 *
 ;            EnableTx  - Subroutine to enable physical Tx             *
 ;            InitTx    - Subroutine to initialise physical Tx         *
@@ -66,117 +91,159 @@ TXSTATEMASK     EQU     B'11111100'
 ;            InitRx    - Subroutine to initialise physical Rx         *
 ;                                                                     *
 ;**********************************************************************
-SrvcLink    macro   ServiceRx, ServiceTx, lnkSte, LINKDELAY, dlyTmr, EnableTx, InitTx, EnableRx, InitRx
+SrvcLink    macro   ServiceRx, ServiceTx, lnkState, LINKDELAY, LINKTMOUT, dlyTmr, EnableTx, InitTx, EnableRx, InitRx
 
-            local   SrvcLnkTable, State0, State1, State2, State3, State4, State5, State6, State7, State8
+            local   SrvcLnkTable, State0, State1, State2, State3, CheckRxDir, State4, State5, State6, State7, State8, State9, CheckTxDir
 
 
     movlw   high SrvcLnkTable ; Load jump table address high byte ...
     movwf   PCLATH            ; ... into PCLATH to make jump in same code block
-    movf    lnkSte,W          ; Use current state value as ...
-    addwf   PCL,F             ; ... offset into state jump table
+    movf    lnkState,W        ; Use current state value ...
+    andlw   LNKSTTEMASK       ; ... (after removing flag bits) ...
+    addwf   PCL,F             ; ... as offset into state jump table
 
 SrvcLnkTable
     ; Rx states
-    goto    State0          ; State 0 - Switching to RX
+    goto    State0          ; State 0 - Switching to Rx
     goto    State1          ; State 1 - Waiting for interface to 'settle'
     goto    State2          ; State 2 - Rx Idle
     goto    State3          ; State 3 - Receiving data
-    ; Tx states (must start on even number for TXSTATEMASK to work)
-    goto    State4          ; State 4 - Switching to TX
+    ; Tx states
+    goto    State4          ; State 4 - Switching to Tx
     goto    State5          ; State 5 - Waiting for far end to 'turn around'
     goto    State6          ; State 6 - Waiting for interface to 'settle'
-    goto    State7          ; State 7 - Tx idle
-    goto    State8          ; State 8 - Transmiting data
+    goto    State7          ; State 7 - Dummy state, go to Tx Idle
+    goto    State8          ; State 8 - Tx idle
+    goto    State9          ; State 9 - Transmiting data
 
 #if (high SrvcLnkTable) != (high $)
     error "Link service state jump table split across page boundary"
 #endif
 
-State0      ; State 0 - Switching to RX
+State0      ; State 0 - Switching to Rx
 
     call    EnableRx        ; Enable Rx physical interface
 
     movlw   low (LINKDELAY + 1)
     movwf   dlyTmr          ; Load interface 'settle' delay
 
-    incf    lnkSte,F        ; Next state = Waiting for interface to 'settle'
+    incf    lnkState,F      ; Next state = Waiting for interface to 'settle'
 
 State1      ; Waiting for interface to 'settle'
 
     decfsz  dlyTmr,F        ; Decrement delay timer, skip if delay expired ...
-    return                  ; ... otherwise remain in current state
+    return                  ; ... else remain in current state
 
     call    InitRx          ; Initialise physical Rx
 
-    incf    lnkSte,F        ; Next state = Rx idle
+    movlw   low (LINKTMOUT + 1)
+    movwf   dlyTmr          ; Load Rx idle link timeout delay
+
+    incf    lnkState,F      ; Next state = Rx idle
 
 State2      ; State 2 - Rx Idle
 
-    call    ServiceRx       ; Check for receive data
-    xorlw   RX_IDLE         ; Test if not receiving data ...
-    btfsc   STATUS,Z        ; ... skip if receiving data ...
-    return                  ; ... return if not receiving data
+    decf    dlyTmr,W        ; Decrement Rx idle link timeout count
+    btfss   STATUS,Z        ; Skip if decremented to zero ...
+    movwf   dlyTmr          ; ... else update timer counter
+    btfsc   STATUS,Z        ; Skip if not zero ...
+    bsf     lnkState,LNKTMOFLAG
 
-    incf    lnkSte,F        ; ... otherwise, next state = Receiving data
+    call    ServiceRx       ; Check for receive data
+    xorlw   RX_BUSY         ; Test if receiving data ...
+    btfss   STATUS,Z        ; ... skip if receiving data ...
+    goto    CheckRxDir      ; ... else check direction if not receiving data
+
+    bcf     lnkState,LNKTMOFLAG
+
+    incf    lnkState,F      ; Next state = Receiving data
     return
 
 State3      ; State 3 - Receiving data
 
     call    ServiceRx       ; Receive data
-    xorlw   RX_IDLE         ; Test if not receiving data ...
-    btfss   STATUS,Z        ; ... skip if not receiving data ...
+    xorlw   RX_BUSY         ; Test if receiving data ...
+    btfsc   STATUS,Z        ; ... skip if not receiving data ...
     return                  ; ... else return if receiving data
 
-    decf    lnkSte,F        ; ... otherwise, next state = Rx Idle
+    movlw   low (LINKTMOUT + 1)
+    movwf   dlyTmr          ; Load Rx idle link timeout delay
+
+    decf    lnkState,F      ; Next state = Rx Idle
+
+CheckRxDir
+    btfss   lnkState,LNKDIRFLAG
     return
 
-State4      ; State 4 - Switching to TX
+    ; Need to change direction to Tx
+
+    movf    lnkState,W      ; Get link status
+    andlw   ~LNKSTTEMASK    ; Mask out state value
+    iorlw   SWITCH2TXSTATE  ; Next state = Switching to Tx
+    movwf   lnkState        ; Update link status
+    return
+
+State4      ; State 4 - Switching to Tx
 
     movlw   low (LINKDELAY + 1)
     movwf   dlyTmr          ; Load far end link 'turn around' delay
 
-    incf    lnkSte,F        ; Next state = Waiting for far end to 'turn around'
+    incf    lnkState,F      ; Next state = Waiting for far end to 'turn around'
 
 State5      ; State 5 - Waiting for far end to 'turn around'
 
     decfsz  dlyTmr,F        ; Decrement delay timer, skip if delay expired ...
-    return                  ; ... otherwise remain in current state
+    return                  ; ... else remain in current state
 
     call    EnableTx        ; Enable Tx physical interface
 
     movlw   low (LINKDELAY + 1)
     movwf   dlyTmr          ; Load interface 'settle' delay
 
-    incf    lnkSte,F        ; Next state = Waiting for interface to 'settle'
+    incf    lnkState,F      ; Next state = Waiting for interface to 'settle'
 
 State6      ; State 6 - Waiting for interface to 'settle'
 
     decfsz  dlyTmr,F        ; Decrement delay timer, skip if delay expired ...
-    return                  ; ... otherwise remain in current state
+    return                  ; ... else remain in current state
 
     call    InitTx          ; Initialise physical Tx
 
-    incf    lnkSte,F        ; Next state = Tx idle
+    incf    lnkState,F      ; Next state = Tx idle
 
-State7      ; State 7 - Tx Idle
+State7      ; State 7 - Dummy state, go to Tx Idle
+
+    incf    lnkState,F      ; Next state = Tx idle
+
+State8      ; State 8 - Tx Idle
 
     call    ServiceTx       ; Check for transmitdata
-    andlw   TX_BUSY         ; Test if transmitting data ...
-    btfsc   STATUS,Z        ; ... skip if transmitting data ...
-    return                  ; ... else return if not transmitting data
+    andlw   TX_BUSY         ; Test if transmitting data
+    btfsc   STATUS,Z        ; Skip if transmitting data ...
+    goto    CheckTxDir      ; ... else check direction if not transmitting data
 
-    incf    lnkSte,F        ; Next state = Transmitting data
+    incf    lnkState,F      ; Next state = Transmitting data
     return
 
-State8      ; State 8 - Transmitting data
+State9      ; State 9 - Transmitting data
 
     call    ServiceTx       ; Transmit data
     andlw   TX_BUSY         ; Test if transmitting data ...
     btfss   STATUS,Z        ; ... skip if not transmitting data ...
     return                  ; ... else return if transmitting data
 
-    decf    lnkSte,F        ; Next state = Tx idle
+    decf    lnkState,F      ; Next state = Tx idle
+
+CheckTxDir
+    btfsc   lnkState,LNKDIRFLAG
+    return
+
+    ; Need to change direction to Rx
+
+    movf    lnkState,W      ; Get link status
+    andlw   ~LNKSTTEMASK    ; Mask out state value
+    iorlw   SWITCH2RXSTATE  ; Next state = Switching to Rx
+    movwf   lnkState        ; Update link status
     return
 
     endm
@@ -188,7 +255,7 @@ State8      ; State 8 - Transmitting data
 ;                                                                     *
 ;            Attempt to get an 'Rx' byte from the link                *
 ;                                                                     *
-; Arguments: lnkSte    - Link's state machine state variable          *
+; Arguments: lnkState  - Link's state machine state variable          *
 ;            PhysRx    - Subroutine to attempt to get 'Rx' byte from  *
 ;                        physical interface                           *
 ;                                                                     *
@@ -196,27 +263,15 @@ State8      ; State 8 - Transmitting data
 ;            W         - Rx byte, if any                              *
 ;                                                                     *
 ;**********************************************************************
-LinkRx      macro   lnkSte, PhysRx
+LinkRx      macro   lnkState, PhysRx
 
-    movlw   RXIDLESTATE
-    xorwf   lnkSte,W
-    btfsc   STATUS,Z        ; Skip if not in Rx idle state ...
-    goto    PhysRx          ; ... otherwise look for received data
+    movf    lnkState,W
+    andlw   RXACTVMASK
+    btfss   STATUS,Z        ; Skip if not in an active Rx state ...
+    goto    PhysRx          ; ... else look for received data
 
-    movlw   RXSTATE
-    xorwf   lnkSte,W
-    btfsc   STATUS,Z        ; Skip if not in receiving data state ...
-    goto    PhysRx          ; ... otherwise look for received data
-
-    movlw   TXIDLESTATE
-    xorwf   lnkSte,W
-    btfss   STATUS,Z        ; Skip if in Tx idle state ...
-    return                  ; ... otherwise give up and return
-
-    ; Link is in Tx idle state, force turn around to Rx
-    movlw   SWITCH2RXSTATE
-    movwf   lnkSte
-    bcf     STATUS,Z        ; Clear STATUS,Z to indicate no data received
+    bcf     lnkState,LNKDIRFLAG ; Turn link around to Rx
+    bcf     STATUS,Z            ; Clear STATUS,Z to indicate no data received
     return
 
     endm
@@ -229,54 +284,22 @@ LinkRx      macro   lnkSte, PhysRx
 ;            Attempt to send a 'Tx' byte to the link                  *
 ;                                                                     *
 ; Arguments: FSR       - Byte to send                                 *
-;            lnkSte    - Link's state machine state variable          *
+;            lnkState  - Link's state machine state variable          *
 ;            PhysRx    - Subroutine to attempt to send 'Tx' byte to   *
 ;                        physical interface                           *
 ;                                                                     *
 ; Returns  : STATUS,Z  - Set if sent byte, clear if not               *
 ;                                                                     *
 ;**********************************************************************
-LinkTx      macro   lnkSte, PhysTx
+LinkTx      macro   lnkState, PhysTx
 
-            local NotIdle, GiveUpTx
+    movf    lnkState,W
+    andlw   TXACTVMASK
+    btfss   STATUS,Z        ; Skip if not in an active Tx state ...
+    goto    PhysTx          ; ... else try to send data
 
-    movlw   TXIDLESTATE
-    xorwf   lnkSte,W
-    btfss   STATUS,Z        ; Skip if in Tx idle state ...
-    goto    NotIdle         ; ... otherwise jump
-
-    ; Link in Tx idle state, try to send data
-    call    PhysTx
-    btfss   STATUS,Z        ; Skip if managed to start Tx ...
-    return                  ; ... otherwise give up and return
-
-    movlw   TXSTATE         ; Tx started, set link ...
-    movwf   lnkSte          ; ... state to transmitting
-    return                  ; STATUS,Z still set to indicate data sent
-
-NotIdle
-    movlw   TXSTATE
-    xorwf   lnkSte,W
-    btfsc   STATUS,Z        ; Skip if not in transmitting state ...
-    goto    PhysTx          ; ... otherwise try to send data
-
-    movlw   RXSTATE
-    xorwf   lnkSte,W
-    btfsc   STATUS,Z        ; Skip if not in receiving state ...
-    goto    GiveUpTx        ; ... otherwise give up and return
-
-    movlw   TXSTATEMASK
-    andwf   lnkSte,W
-    btfss   STATUS,Z        ; Skip if not in any Tx state ...
-    goto    GiveUpTx        ; ... otherwise give up and return
-
-
-    ; Link is in non receiving Rx state, force turn around to transmit
-    movlw   SWITCH2TXSTATE
-    movwf   lnkSte
-
-GiveUpTx
-    bcf     STATUS,Z        ; Clear STATUS,Z to indicate data not sent
+    bsf     lnkState,LNKDIRFLAG ; Turn link around to Tx
+    bcf     STATUS,Z            ; Clear STATUS,Z to indicate data not sent
     return
 
     endm
@@ -288,15 +311,16 @@ GiveUpTx
 ;                                                                     *
 ;            Test if link state machine is in 'Rx Idle' state         *
 ;                                                                     *
-; Arguments: lnkSte    - Link's state machine state variable          *
+; Arguments: lnkState  - Link's state machine state variable          *
 ;                                                                     *
 ; Returns  : STATUS,Z  - Set if in 'Rx Idle' state, clear if not      *
 ;                                                                     *
 ;**********************************************************************
-IsRxIdle    macro   lnkSte
+IsRxIdle    macro   lnkState
 
-    movlw   RXIDLESTATE
-    xorf    lnkSte,W
+    movlw   LNKSTTEMASK
+    andwf   lnkState,W
+    xorlw   RXIDLESTATE
 
     endm
 
@@ -308,15 +332,16 @@ IsRxIdle    macro   lnkSte
 ;                                                                     *
 ;            Test if link state machine is in 'Tx Idle' state         *
 ;                                                                     *
-; Arguments: lnkSte    - Link's state machine state variable          *
+; Arguments: lnkState  - Link's state machine state variable          *
 ;                                                                     *
 ; Returns  : STATUS,Z  - Set if in 'Tx Idle' state, clear if not      *
 ;                                                                     *
 ;**********************************************************************
-IsTxIdle    macro   lnkSte
+IsTxIdle    macro   lnkState
 
-    movlw   TXIDLESTATE
-    xorf    lnkSte,W
+    movlw   LNKSTTEMASK
+    andwf   lnkState,W
+    xorlw   TXIDLESTATE
 
     endm
 
