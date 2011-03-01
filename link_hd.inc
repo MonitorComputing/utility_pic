@@ -167,6 +167,9 @@ State4      ; State 4 - Switching to Tx
 
     bcf     lnkState,LNKRXFLG   ; Disable physical Rx (link is half duplex)
 
+    movlw   (LINKTMOUT + 1)
+    movwf   linkTimer       ; Reset link Rx idle timeout counter
+
     movlw   (LINKDLYTX + 1)
     movwf   dlyTmr          ; Load far end turn around delay
 
@@ -179,9 +182,6 @@ State5      ; State 5 - Waiting for far end to turn around
 
     call    EnableTx        ; Enable Tx physical interface
     call    InitTx          ; Initialise physical Tx
-
-    movlw   (LINKTMOUT + 1)
-    movwf   linkTimer       ; Reset link Rx idle timeout counter
 
     movlw   (LINKDLYTX + 1)
     movwf   dlyTmr          ; Load interface settle delay
@@ -340,6 +340,29 @@ SyncTx      macro   lnkState
 
     bsf     lnkState,LNKDIRFLG  ; Ensure link direction is Tx
     bsf     lnkState,LNKSYNFLG  ; Set synchronise required
+
+    endm
+
+
+;**********************************************************************
+;                                                                     *
+; Macro:     IsLinkRxTo                                               *
+;                                                                     *
+;            Test if link reception has timed out                     *
+;                                                                     *
+; Arguments: lnkState  - Link's state machine state variable          *
+;            linkTimer - Rx timeout timer                             *
+;                                                                     *
+; Returns  : STATUS,Z  - Set if Rx timedout, clear if not             *
+;                                                                     *
+;**********************************************************************
+IsLinkRxTo  macro   lnkState, linkTimer
+
+    movf    lnkState,W
+    andlw   LNKSTTEMASK
+    xorlw   RXSTATE
+    btfsc   STATUS,Z        ; Skip if not in receiving data state ...
+    decf    linkTimer,W     ; ... else test link timeout timer
 
     endm
 
