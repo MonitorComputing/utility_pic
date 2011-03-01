@@ -36,43 +36,43 @@
 
 ; lnkState - Link state register
 ;   bit 0,3 - Current state
-;     0  - Switching to Rx
-;     1  - Waiting for interface to 'settle'
-;     2  - Rx Idle
-;     3  - Receiving data
-;     4  - Switching to Tx
-;     5  - Waiting for far end to 'turn around'
-;     6  - Waiting for interface to 'settle'
-;     7  - Transmiting break
+;     0 - Switching to Rx
+;     1 - Waiting for interface lines to settle
+;     2 - Receiving data
+;     3 - Unused
+;     4 - Switching to Tx
+;     5 - Waiting for far end to turn around
+;     6 - Waiting for interface lines to settle
+;     7 - Unused
 ;          'Active' Tx states must be in the range 8 to 15
-;     8  - Tx idle
-;     9  - Transmiting data
-;   bit 4 - Unused
-;   bit 5 - Synchronise, Tx a break or Rx until a break is received
-;   bit 6 - Rx idle timedout without receiving any data
+;     8 - Transmiting break
+;     9 - Transmiting data
+;   bit 4 - Tx enabled
+;   bit 5 - Rx enabled
+;   bit 6 - Synchronise, Tx or Rx a break
 ;   bit 7 - Required direction, set = Tx, clear = Rx
 
 ; Rx states
-SWITCH2RXSTATE  EQU     0   ; Switching to Rx
-RXSETTLESTATE   EQU     1   ; Waiting for interface to 'settle'
-RXIDLESTATE     EQU     2   ; Rx Idle
-RXSTATE         EQU     3   ; Receiving data
+SWITCH2RXSTATE EQU  0           ; Switching to Rx
+RXSETTLESTATE  EQU  1           ; Waiting for interface to 'settle'
+RXSTATE        EQU  2           ; Receiving data
 
 ; Tx states
-SWITCH2TXSTATE  EQU     4   ; Switching to Tx
-TXTURNSTATE     EQU     5   ; Waiting for far end to 'turn around'
-TXSETTLESTATE   EQU     6   ; Waiting for interface to 'settle'
-TXBRKSTATE      EQU     7   ; Transmiting break
-TXIDLESTATE     EQU     8   ; Tx idle
-TXSTATE         EQU     9   ; Transmiting data
+SWITCH2TXSTATE EQU  4           ; Switching to Tx
+TXTURNSTATE    EQU  5           ; Waiting for far end to 'turn around'
+TXSETTLESTATE  EQU  6           ; Waiting for interface to 'settle'
+TXBRKSTATE     EQU  8           ; Transmiting break
+TXSTATE        EQU  9           ; Transmiting data
 
-TXACTVMASK      EQU     B'00001000' ; Mask to test for in active Tx state
+TXSTTEMASK     EQU  B'00001100' ; Mask state for any Tx
+TXACTVMASK     EQU  B'00001000' ; Mask state for in active Tx
 
-LNKSTTEMASK     EQU     B'00001111' ; Mask to isolate state value
+LNKSTTEMASK    EQU  B'00001111' ; Mask to isolate state value
 
-LNKSYNFLAG      EQU     5   ; Synchronise Tx or Rx status bit
-LNKTMOFLAG      EQU     6   ; Link Rx idle timedout status bit
-LNKDIRFLAG      EQU     7   ; Required direction bit, set = Tx, clear = Rx
+LNKTXFLG       EQU  4           ; Link Tx active status bit
+LNKRXFLG       EQU  5           ; Link Rx active status bit
+LNKSYNFLG      EQU  6           ; Synchronise Tx or Rx status bit
+LNKDIRFLG      EQU  7           ; Required direction bit, set = Tx, clear = Rx
 
 ;**********************************************************************
 ;                                                                     *
@@ -80,109 +80,76 @@ LNKDIRFLAG      EQU     7   ; Required direction bit, set = Tx, clear = Rx
 ;                                                                     *
 ;            State machine macro to implement half duplex Bod link    *
 ;                                                                     *
-; Arguments: ServiceRx - Subroutine to service physical Rx            *
-;            ServiceTx - Subroutine to service physical Tx            *
-;            BreakTx   - Subroutine to service physical break Tx      *
-;            lnkState  - Link's state machine state variable          *
-;            LINKDELAY - Delay value to be used in link timing delays *
+; Arguments: lnkState  - Link's state machine state variable          *
+;            linkTimer - Rx timeout timer                             *
+;            dlyTmr    - Link's delay timer                           *
+;            LINKDLYRX - Delay for when switching to Rx               *
+;            LINKDLYTX - Delay, used twice, for when switching to Tx  *
 ;            LINKTMOUT - Delay value to timeout if no data received   *
-;            dlyTmr    - Link's delay timing variable                 *
 ;            EnableTx  - Subroutine to enable physical Tx             *
 ;            InitTx    - Subroutine to initialise physical Tx         *
+;            IsTxIdle  - Subroutine to check if physical Tx is idle   *
 ;            EnableRx  - Subroutine to enable physical Rx             *
 ;            InitRx    - Subroutine to initialise physical Rx         *
 ;                                                                     *
 ;**********************************************************************
-SrvcLink    macro   ServiceRx, ServiceTx, BreakTx, lnkState, LINKDELAY, LINKTMOUT, dlyTmr, EnableTx, InitTx, EnableRx, InitRx
+SrvcLink    macro   lnkState, linkTimer, dlyTmr, LINKDLYRX, LINKDLYTX, LINKTMOUT, EnableTx, InitTx, IsTxIdle, EnableRx, InitRx
 
-            local   SrvcLnkTable, State0, State1, State2, State3, SkipRxBreak, CheckRxDir, State4, State5, State6, State7, State8, State9, CheckTxDir, FlipToRx
+            local   ChangeState, StateTable, State0, State1, State2, State3, SkipRxBreak, CheckRxDir, State4, State5, State6, State7, State8, State9, CheckTxDir, FlipToRx
 
-
-    movlw   high SrvcLnkTable ; Load jump table address high byte ...
+ChangeState
+    movlw   high StateTable   ; Load jump table address high byte ...
     movwf   PCLATH            ; ... into PCLATH to make jump in same code block
     movf    lnkState,W        ; Use current state value ...
     andlw   LNKSTTEMASK       ; ... (after removing flag bits) ...
     addwf   PCL,F             ; ... as offset into state jump table
 
-SrvcLnkTable
+StateTable
     ; Rx states
     goto    State0          ; State 0 - Switching to Rx
-    goto    State1          ; State 1 - Waiting for interface to 'settle'
-    goto    State2          ; State 2 - Rx Idle
-    goto    State3          ; State 3 - Receiving data
+    goto    State1          ; State 1 - Waiting for interface lines to settle
+    goto    State2          ; State 2 - Receiving data
+    goto    State3          ; State 3 - Unused
     ; Tx states
-    goto    State4          ; State 4  - Switching to Tx
-    goto    State5          ; State 5  - Waiting for far end to 'turn around'
-    goto    State6          ; State 6  - Waiting for interface to 'settle'
-    goto    State7          ; State 7  - Transmiting break
-    goto    State8          ; State 8  - Tx idle
-    goto    State9          ; State 9  - Transmiting data
+    goto    State4          ; State 4 - Switching to Tx
+    goto    State5          ; State 5 - Waiting for far end to turn around
+    goto    State6          ; State 6 - Waiting for interface lines to settle
+    ;  'Active' Tx states must be in the range 8 to 15
+    goto    State7          ; State 7 - Unused
+    goto    State8          ; State 8 - Transmiting break
+    goto    State9          ; State 9 - Transmiting data
 
-#if (high SrvcLnkTable) != (high $)
-    error "Link service state jump table split across page boundary"
+#if (high StateTable) != (high $)
+    error "Link service state machine split across page boundary"
 #endif
 
 State0      ; State 0 - Switching to Rx
 
+    bcf     lnkState,LNKTXFLG   ; Disable physical Tx (link is half duplex)
+
     call    EnableRx        ; Enable Rx physical interface
-
-    movlw   low (LINKDELAY + 1)
-    movwf   dlyTmr          ; Load interface 'settle' delay
-
-    incf    lnkState,F      ; Next state = Waiting for interface to 'settle'
-
-State1      ; Waiting for interface to 'settle'
-
-    decfsz  dlyTmr,F        ; Decrement delay timer, skip if delay expired ...
-    return                  ; ... else remain in current state
-
     call    InitRx          ; Initialise physical Rx
 
-    movlw   low (LINKTMOUT + 1)
-    movwf   dlyTmr          ; Load Rx idle link timeout delay
+    movlw   (LINKTMOUT + 1)
+    movwf   linkTimer       ; Reset no data received timeout
 
-    incf    lnkState,F      ; Next state = Rx idle
+    movlw   (LINKDLYRX + 1)
+    movwf   dlyTmr          ; Load interface settle delay
 
-State2      ; State 2 - Rx Idle
+    incf    lnkState,F      ; Next state = Waiting for interface to settle
 
-    decf    dlyTmr,W        ; Decrement Rx idle link timeout count
-    btfss   STATUS,Z        ; Skip if decremented to zero ...
-    movwf   dlyTmr          ; ... else update timer counter
-    btfsc   STATUS,Z        ; Skip if not zero ...
-    bsf     lnkState,LNKTMOFLAG
+State1      ; Waiting for interface lines to settle
 
-    call    ServiceRx       ; Check for receive data
-    xorlw   RX_BUSY         ; Test if receiving data ...
-    btfss   STATUS,Z        ; ... skip if receiving data ...
-    goto    CheckRxDir      ; ... else check direction if not receiving data
+    decfsz  dlyTmr,W        ; Skip if delay expired ...
+    return                  ; ... else remain in current state
 
-    bcf     lnkState,LNKTMOFLAG
+    bsf     lnkState,LNKRXFLG   ; Enable physical Rx
 
     incf    lnkState,F      ; Next state = Receiving data
-    return
 
-State3      ; State 3 - Receiving data
+State2      ; State 2 - Receiving data
 
-    call    ServiceRx       ; Receive data
-    xorlw   RX_BUSY         ; Test if receiving data ...
-    btfsc   STATUS,Z        ; ... skip if not receiving data ...
-    return                  ; ... else return if receiving data
-
-    xorlw   (RX_BRK ^ RX_BUSY)  ; Test if received break ...
-    btfss   STATUS,Z            ; ... skip if received break ...
-    goto    SkipRxBreak         ; ... else simply become Rx idle
-
-    btfss   lnkState,LNKDIRFLAG ; Skip if direction changing to Tx ...
-    bcf     lnkState,LNKSYNFLAG ; ... else clear synchronise
-
-SkipRxBreak
-    movlw   low (LINKTMOUT + 1)
-    movwf   dlyTmr          ; Load Rx idle link timeout delay
-
-    decf    lnkState,F      ; Next state = Rx Idle
-
-CheckRxDir
-    btfss   lnkState,LNKDIRFLAG
+    btfss   lnkState,LNKDIRFLG  ; Skip if required direction is Tx
     return
 
     ; Need to change direction to Tx
@@ -191,89 +158,82 @@ CheckRxDir
     andlw   ~LNKSTTEMASK    ; Mask out state value
     iorlw   SWITCH2TXSTATE  ; Next state = Switching to Tx
     movwf   lnkState        ; Update link status
+    goto    State4
+
+State3      ; State 3 - Unused
     return
 
 State4      ; State 4 - Switching to Tx
 
-    movlw   low (LINKDELAY + 1)
-    movwf   dlyTmr          ; Load far end link 'turn around' delay
+    bcf     lnkState,LNKRXFLG   ; Disable physical Rx (link is half duplex)
 
-    incf    lnkState,F      ; Next state = Waiting for far end to 'turn around'
+    movlw   (LINKDLYTX + 1)
+    movwf   dlyTmr          ; Load far end turn around delay
 
-State5      ; State 5 - Waiting for far end to 'turn around'
+    incf    lnkState,F      ; Next state = Waiting for far end to turn around
 
-    decfsz  dlyTmr,F        ; Decrement delay timer, skip if delay expired ...
+State5      ; State 5 - Waiting for far end to turn around
+
+    decfsz  dlyTmr,W        ; Skip if delay expired ...
     return                  ; ... else remain in current state
 
     call    EnableTx        ; Enable Tx physical interface
-
-    movlw   low (LINKDELAY + 1)
-    movwf   dlyTmr          ; Load interface 'settle' delay
-
-    incf    lnkState,F      ; Next state = Waiting for interface to 'settle'
-
-State6      ; State 6 - Waiting for interface to 'settle'
-
-    decfsz  dlyTmr,F        ; Decrement delay timer, skip if delay expired ...
-    return                  ; ... else remain in current state
-
     call    InitTx          ; Initialise physical Tx
 
-    incf    lnkState,F          ; Next state = Transmitting break
-    btfsc   lnkState,LNKSYNFLAG ; Skip if synchronise not required ...
-    goto    State7              ; ... else go to State 7 - Transmitting break
+    movlw   (LINKTMOUT + 1)
+    movwf   linkTimer       ; Reset link Rx idle timeout counter
 
-    incf    lnkState,F      ; Next state = Tx idle
-    goto    State8          ; Go to State 8 - Tx Idle
+    movlw   (LINKDLYTX + 1)
+    movwf   dlyTmr          ; Load interface settle delay
 
-State7      ; State 7 - Transmitting break
+    incf    lnkState,F      ; Next state = Waiting for interface to settle
 
-    call    BreakTx         ; Transmit break
-    andlw   TX_BUSY         ; Test if transmitting break ...
-    btfss   STATUS,Z        ; ... skip if not transmitting break ...
-    return                  ; ... else return if transmitting break
+State6      ; State 6 - Waiting for interface to settle
 
-    btfsc   lnkState,LNKDIRFLAG ; Skip if direction changing to Rx ...
-    bcf     lnkState,LNKSYNFLAG ; ... else clear synchronise
+    decfsz  dlyTmr,W        ; Skip if delay expired ...
+    return                  ; ... else remain in current state
 
-    incf    lnkState,F      ; Next state = Tx idle
-    goto    CheckTxDir
+    bsf     lnkState,LNKTXFLG   ; Enable physical Tx
 
-State8      ; State 8 - Tx Idle
+    incf    lnkState,F          ; Next state = Unused
+    incf    lnkState,F          ; Next state = Transmiting break
+    btfss   lnkState,LNKSYNFLG  ; Skip if synchronise required ...
+    incf    lnkState,F          ; ... else next state = Transmiting data
+    goto    ChangeState
 
-    call    ServiceTx       ; Check for transmitdata
-    andlw   TX_BUSY         ; Test if transmitting data
-    btfsc   STATUS,Z        ; Skip if transmitting data ...
-    goto    CheckTxDir      ; ... else check direction if not transmitting data
-
-    incf    lnkState,F      ; Next state = Transmitting data
+State7      ; State 7 - Unused
     return
 
-State9      ; State 9 - Transmitting data
+State8      ; State 8 - Transmiting break
 
-    call    ServiceTx       ; Transmit data
-    andlw   TX_BUSY         ; Test if transmitting data ...
-    btfss   STATUS,Z        ; ... skip if not transmitting data ...
-    return                  ; ... else return if transmitting data
+    btfsc   lnkState,LNKDIRFLG  ; Skip if direction is changing to Rx ...
+    bcf     lnkState,LNKSYNFLG  ; ... else clear synchronise
 
-    decf    lnkState,F      ; Next state = Tx idle
+    incf    lnkState,F      ; Next state = Transmiting data
 
-CheckTxDir
-    btfss   lnkState,LNKDIRFLAG ; Skip if direction staying as Tx
+State9      ; State 9 - Transmiting data
+
+    btfss   lnkState,LNKDIRFLG  ; Skip if required direction is Tx
     goto    FlipToRx
 
-    btfsc   lnkState,LNKSYNFLAG ; Skip if synchronise not required ...
-    decf    lnkState,F          ; ... else next state = Transmitting break
-    return
+    btfss   lnkState,LNKSYNFLG  ; Skip if synchronise required ...
+    return                      ; ... else remain in current state
+
+    decf    lnkState,F          ; Next state = Transmiting break
+    goto    State8
 
 FlipToRx
     ; Need to change direction to Rx
+
+    call    IsTxIdle
+    btfss   STATUS,Z        ; Skip if transmit is idle ...
+    return                  ; ... else continue transmiting
 
     movf    lnkState,W      ; Get link status
     andlw   ~LNKSTTEMASK    ; Mask out state value
     iorlw   SWITCH2RXSTATE  ; Next state = Switching to Rx
     movwf   lnkState        ; Update link status
-    return
+    goto    State0
 
     endm
 
@@ -294,20 +254,24 @@ FlipToRx
 ;**********************************************************************
 LinkRx      macro   lnkState, PhysRx
 
-    bcf     lnkState,LNKDIRFLAG ; Ensure link direction is Rx
-    bcf     STATUS,Z            ; Clear STATUS,Z to indicate no data received
-    btfsc   lnkState,LNKSYNFLAG ; Skip if synchronise not required ...
-    return                      ; ... else skip data pending synchronisation
+            local   QuitRx
 
     movf    lnkState,W
-    xorlw   RXIDLESTATE
-    btfsc   STATUS,Z        ; Skip if not in Rx idle state ...
-    goto    PhysRx          ; ... else look for received data
+    andlw   TXSTTEMASK
+    btfss   STATUS,Z        ; Skip if not in any Tx state ...
+    goto    QuitRx          ; ... else abandon check for received data
 
-    xorlw   (RXSTATE ^ RXIDLESTATE)
+    btfsc   lnkState,LNKSYNFLG  ; Skip if waiting to synchronise ...
+    goto    QuitRx              ; ... else abandon check for received data
+
+    movf    lnkState,W
+    andlw   LNKSTTEMASK
+    xorlw   RXSTATE
     btfsc   STATUS,Z        ; Skip if not in receiving data state ...
     goto    PhysRx          ; ... else look for received data
 
+QuitRx
+    bcf     lnkState,LNKDIRFLG  ; Ensure link direction is Rx
     return
 
     endm
@@ -329,16 +293,17 @@ LinkRx      macro   lnkState, PhysRx
 ;**********************************************************************
 LinkTx      macro   lnkState, PhysTx
 
-    bsf     lnkState,LNKDIRFLAG ; Ensure link direction is Tx
-    bcf     STATUS,Z            ; Clear STATUS,Z to indicate no data sent
-    btfsc   lnkState,LNKSYNFLAG ; Skip if synchronise not required ...
-    return                      ; ... else block send pending synchronisation
+            local   QuitTx
 
     movf    lnkState,W
     andlw   TXACTVMASK
-    btfss   STATUS,Z        ; Skip if not in an active Tx state ...
-    goto    PhysTx          ; ... else try to send data
+    btfsc   STATUS,Z            ; Skip if in an active Tx state ...
+    goto    QuitTx              ; ... else abandon attempt to send
 
+    goto    PhysTx              ; ... else attempt to send data
+
+QuitTx
+    bsf     lnkState,LNKDIRFLG  ; Ensure link direction is Tx
     bcf     STATUS,Z            ; Clear STATUS,Z to indicate data not sent
     return
 
@@ -349,15 +314,15 @@ LinkTx      macro   lnkState, PhysTx
 ;                                                                     *
 ; Macro:     SyncRx                                                   *
 ;                                                                     *
-;            Synchronise by waiting until a break is received         *
+;            Schedule Rx synchronisation                              *
 ;                                                                     *
 ; Arguments: lnkState  - Link's state machine state variable          *
 ;                                                                     *
 ;**********************************************************************
 SyncRx      macro   lnkState
 
-    bcf     lnkState,LNKDIRFLAG ; Ensure link direction is Rx
-    bsf     lnkState,LNKSYNFLAG ; Set synchronise required
+    bcf     lnkState,LNKDIRFLG  ; Ensure link direction is Rx
+    bsf     lnkState,LNKSYNFLG  ; Set synchronise required
 
     endm
 
@@ -366,56 +331,15 @@ SyncRx      macro   lnkState
 ;                                                                     *
 ; Macro:     SyncTx                                                   *
 ;                                                                     *
-;            Synchronise by sending a break is received               *
+;            Schedule Tx synchronisation                              *
 ;                                                                     *
 ; Arguments: lnkState  - Link's state machine state variable          *
 ;                                                                     *
 ;**********************************************************************
 SyncTx      macro   lnkState
 
-    bsf     lnkState,LNKDIRFLAG ; Ensure link direction is Tx
-    bsf     lnkState,LNKSYNFLAG ; Set synchronise required
-
-    endm
-
-
-;**********************************************************************
-;                                                                     *
-; Macro:     IsRxIdle                                                 *
-;                                                                     *
-;            Test if link state machine is in 'Rx Idle' state         *
-;                                                                     *
-; Arguments: lnkState  - Link's state machine state variable          *
-;                                                                     *
-; Returns  : STATUS,Z  - Set if in 'Rx Idle' state, clear if not      *
-;                                                                     *
-;**********************************************************************
-IsRxIdle    macro   lnkState
-
-    movlw   LNKSTTEMASK
-    andwf   lnkState,W
-    xorlw   RXIDLESTATE
-
-    endm
-
-
-
-;**********************************************************************
-;                                                                     *
-; Macro:     IsTxIdle                                                 *
-;                                                                     *
-;            Test if link state machine is in 'Tx Idle' state         *
-;                                                                     *
-; Arguments: lnkState  - Link's state machine state variable          *
-;                                                                     *
-; Returns  : STATUS,Z  - Set if in 'Tx Idle' state, clear if not      *
-;                                                                     *
-;**********************************************************************
-IsTxIdle    macro   lnkState
-
-    movlw   LNKSTTEMASK
-    andwf   lnkState,W
-    xorlw   TXIDLESTATE
+    bsf     lnkState,LNKDIRFLG  ; Ensure link direction is Tx
+    bsf     lnkState,LNKSYNFLG  ; Set synchronise required
 
     endm
 
