@@ -485,7 +485,7 @@ TxNextBit
     ; transmit data register one bit to the right, 'most significant bit'
     ; to 'least significant bit', using the carry flag to ensure the 'most
     ; significant bit' is set after the shift (ensures that after sending
-    ; the eight bits of data stop bits are 1 output low = RS232 'mark').
+    ; the eight bits of data stop bits are 1 (output low = RS232 'mark').
     ; The transmit output bit is set to the complement of the 'least
     ; significant bit' of the shift register (before the shift took
     ; place), i.e. 0 equals output high (RS232 'space'), 1 equals output
