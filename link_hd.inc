@@ -130,9 +130,6 @@ State0      ; State 0 - Switching to Rx
     call    EnableRx        ; Enable Rx physical interface
     call    InitRx          ; Initialise physical Rx
 
-    movlw   (LINKTMOUT + 1)
-    movwf   linkTimer       ; Reset no data received timeout
-
     movlw   (LINKDLYRX + 1)
     movwf   dlyTmr          ; Load interface settle delay
 
@@ -142,6 +139,9 @@ State1      ; Waiting for interface lines to settle
 
     decfsz  dlyTmr,W        ; Skip if delay expired ...
     return                  ; ... else remain in current state
+
+    movlw   (LINKTMOUT + 1)
+    movwf   linkTimer       ; Reset no data received timeout
 
     bsf     lnkState,LNKRXFLG   ; Enable physical Rx
 
