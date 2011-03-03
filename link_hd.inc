@@ -36,17 +36,20 @@
 
 ; lnkState - Link state register
 ;   bit 0,3 - Current state
-;     0 - Switching to Rx
-;     1 - Waiting for interface lines to settle
-;     2 - Receiving data
-;     3 - Unused
-;     4 - Switching to Tx
-;     5 - Waiting for far end to turn around
-;     6 - Waiting for interface lines to settle
-;     7 - Unused
+;          Rx states must be in the range 0 to 3
+;     0  - Switching to Rx
+;     1  - Waiting for interface lines to settle
+;     2  - Receiving data
+;     3  - Unused
+;          Tx states must be in the range 4 to 15
+;     4  - Unused
+;     5  - Unused
+;     6  - Switching to Tx
+;     7  - Waiting for far end to turn around
 ;          'Active' Tx states must be in the range 8 to 15
-;     8 - Transmiting break
-;     9 - Transmiting data
+;     8  - Waiting for interface lines to settle
+;     9  - Transmiting break
+;     10 - Transmiting data
 ;   bit 4 - Tx enabled
 ;   bit 5 - Rx enabled
 ;   bit 6 - Synchronise, Tx or Rx a break
@@ -58,21 +61,25 @@ RXSETTLESTATE  EQU  1           ; Waiting for interface to 'settle'
 RXSTATE        EQU  2           ; Receiving data
 
 ; Tx states
-SWITCH2TXSTATE EQU  4           ; Switching to Tx
-TXTURNSTATE    EQU  5           ; Waiting for far end to 'turn around'
-TXSETTLESTATE  EQU  6           ; Waiting for interface to 'settle'
-TXBRKSTATE     EQU  8           ; Transmiting break
-TXSTATE        EQU  9           ; Transmiting data
+SWITCH2TXSTATE EQU  6           ; Switching to Tx
+TXTURNSTATE    EQU  7           ; Waiting for far end to 'turn around'
+TXSETTLESTATE  EQU  8           ; Waiting for interface to 'settle'
+TXBRKSTATE     EQU  9           ; Transmiting break
+TXSTATE        EQU  10          ; Transmiting data
 
-TXSTTEMASK     EQU  B'00001100' ; Mask state for any Tx
-TXACTVMASK     EQU  B'00001000' ; Mask state for in active Tx
+TXSTTEMASK     EQU  B'00001100' ; Mask to test for any Tx state
+TXACTVMASK     EQU  B'00001000' ; Mask for in an active Tx state
 
 LNKSTTEMASK    EQU  B'00001111' ; Mask to isolate state value
 
 LNKTXFLG       EQU  4           ; Link Tx active status bit
+LNKTXMSK       EQU  B'00010000' ; Link Tx active status mask
 LNKRXFLG       EQU  5           ; Link Rx active status bit
+LNKRXMSK       EQU  B'00100000' ; Link Rx active status mask
 LNKSYNFLG      EQU  6           ; Synchronise Tx or Rx status bit
+LNKSYNMSK      EQU  B'01000000' ; Link synchronise status mask
 LNKDIRFLG      EQU  7           ; Required direction bit, set = Tx, clear = Rx
+LNKDIRMSK      EQU  B'10000000' ; Link direction status mask
 
 ;**********************************************************************
 ;                                                                     *
@@ -95,9 +102,8 @@ LNKDIRFLG      EQU  7           ; Required direction bit, set = Tx, clear = Rx
 ;**********************************************************************
 SrvcLink    macro   lnkState, linkTimer, dlyTmr, LINKDLYRX, LINKDLYTX, LINKTMOUT, EnableTx, InitTx, IsTxIdle, EnableRx, InitRx
 
-            local   ChangeState, StateTable, State0, State1, State2, State3, SkipRxBreak, CheckRxDir, State4, State5, State6, State7, State8, State9, CheckTxDir, FlipToRx
+            local   StateTable, State0, State1, State2, State3, SkipRxBreak, CheckRxDir, State4, State5, State6, State7, State8, State9, State10, CheckTxDir, GoToState10, FlipToRx
 
-ChangeState
     movlw   high StateTable   ; Load jump table address high byte ...
     movwf   PCLATH            ; ... into PCLATH to make jump in same code block
     movf    lnkState,W        ; Use current state value ...
@@ -106,18 +112,19 @@ ChangeState
 
 StateTable
     ; Rx states
-    goto    State0          ; State 0 - Switching to Rx
-    goto    State1          ; State 1 - Waiting for interface lines to settle
-    goto    State2          ; State 2 - Receiving data
-    goto    State3          ; State 3 - Unused
+    goto    State0          ; State 0  - Switching to Rx
+    goto    State1          ; State 1  - Waiting for interface lines to settle
+    goto    State2          ; State 2  - Receiving data
+    return                  ; State 3  - Unused
     ; Tx states
-    goto    State4          ; State 4 - Switching to Tx
-    goto    State5          ; State 5 - Waiting for far end to turn around
-    goto    State6          ; State 6 - Waiting for interface lines to settle
+    return                  ; State 4  - Unused
+    return                  ; State 5  - Unused
+    goto    State6          ; State 6  - Switching to Tx
+    goto    State7          ; State 7  - Waiting for far end to turn around
     ;  'Active' Tx states must be in the range 8 to 15
-    goto    State7          ; State 7 - Unused
-    goto    State8          ; State 8 - Transmiting break
-    goto    State9          ; State 9 - Transmiting data
+    goto    State8          ; State 8  - Waiting for interface lines to settle
+    goto    State9          ; State 9  - Transmiting break
+    goto    State10         ; State 10 - Transmiting data
 
 #if (high StateTable) != (high $)
     error "Link service state machine split across page boundary"
@@ -149,21 +156,23 @@ State1      ; Waiting for interface lines to settle
 
 State2      ; State 2 - Receiving data
 
-    btfss   lnkState,LNKDIRFLG  ; Skip if required direction is Tx
-    return
+    btfss   lnkState,LNKDIRFLG  ; Skip if required direction is Tx ...
+    return                      ; ... else remain in current state
 
     ; Need to change direction to Tx
 
-    movf    lnkState,W      ; Get link status
-    andlw   ~LNKSTTEMASK    ; Mask out state value
-    iorlw   SWITCH2TXSTATE  ; Next state = Switching to Tx
-    movwf   lnkState        ; Update link status
-    goto    State4
+    incf    lnkState,F      ; Next state = Unused
 
-State3      ; State 3 - Unused
-    return
+State3      ; State 5 - Unused
+    incf    lnkState,F      ; Next state = Unused
 
-State4      ; State 4 - Switching to Tx
+State4      ; State 5 - Unused
+    incf    lnkState,F      ; Next state = Unused
+
+State5      ; State 5 - Unused
+    incf    lnkState,F      ; Next state = Unused
+
+State6      ; State 6 - Switching to Tx
 
     bcf     lnkState,LNKRXFLG   ; Disable physical Rx (link is half duplex)
 
@@ -175,7 +184,7 @@ State4      ; State 4 - Switching to Tx
 
     incf    lnkState,F      ; Next state = Waiting for far end to turn around
 
-State5      ; State 5 - Waiting for far end to turn around
+State7      ; State 7 - Waiting for far end to turn around
 
     decfsz  dlyTmr,W        ; Skip if delay expired ...
     return                  ; ... else remain in current state
@@ -188,30 +197,26 @@ State5      ; State 5 - Waiting for far end to turn around
 
     incf    lnkState,F      ; Next state = Waiting for interface to settle
 
-State6      ; State 6 - Waiting for interface to settle
+State8      ; State 8 - Waiting for interface to settle
 
     decfsz  dlyTmr,W        ; Skip if delay expired ...
     return                  ; ... else remain in current state
 
     bsf     lnkState,LNKTXFLG   ; Enable physical Tx
 
-    incf    lnkState,F          ; Next state = Unused
     incf    lnkState,F          ; Next state = Transmiting break
     btfss   lnkState,LNKSYNFLG  ; Skip if synchronise required ...
-    incf    lnkState,F          ; ... else next state = Transmiting data
-    goto    ChangeState
+    goto    GoToState10         ; ... else jump into transmiting data state
 
-State7      ; State 7 - Unused
-    return
-
-State8      ; State 8 - Transmiting break
+State9      ; State 9 - Transmiting break
 
     btfsc   lnkState,LNKDIRFLG  ; Skip if direction is changing to Rx ...
     bcf     lnkState,LNKSYNFLG  ; ... else clear synchronise
 
+GoToState10
     incf    lnkState,F      ; Next state = Transmiting data
 
-State9      ; State 9 - Transmiting data
+State10     ; State 10 - Transmiting data
 
     btfss   lnkState,LNKDIRFLG  ; Skip if required direction is Tx
     goto    FlipToRx
@@ -220,7 +225,7 @@ State9      ; State 9 - Transmiting data
     return                      ; ... else remain in current state
 
     decf    lnkState,F          ; Next state = Transmiting break
-    goto    State8
+    goto    State9
 
 FlipToRx
     ; Need to change direction to Rx
@@ -258,20 +263,15 @@ LinkRx      macro   lnkState, PhysRx
 
     movf    lnkState,W
     andlw   TXSTTEMASK
-    btfss   STATUS,Z        ; Skip if not in any Tx state ...
-    goto    QuitRx          ; ... else abandon check for received data
+    btfss   STATUS,Z            ; Skip if not in any Tx state ...
+    return                      ; ... else abandon check for received data
 
     btfsc   lnkState,LNKSYNFLG  ; Skip if waiting to synchronise ...
-    goto    QuitRx              ; ... else abandon check for received data
+    return                      ; ... else abandon check for received data
 
-    movf    lnkState,W
-    andlw   LNKSTTEMASK
-    xorlw   RXSTATE
-    btfsc   STATUS,Z        ; Skip if not in receiving data state ...
-    goto    PhysRx          ; ... else look for received data
-
-QuitRx
-    bcf     lnkState,LNKDIRFLG  ; Ensure link direction is Rx
+    bcf     STATUS,Z            ; Cannot be receive if not in Rx state
+    btfsc   lnkState,LNKRXFLG   ; Skip if not in receiving data state ...
+    goto    PhysRx              ; ... else look for received data
     return
 
     endm
@@ -297,14 +297,11 @@ LinkTx      macro   lnkState, PhysTx
 
     movf    lnkState,W
     andlw   TXACTVMASK
-    btfsc   STATUS,Z            ; Skip if in an active Tx state ...
-    goto    QuitTx              ; ... else abandon attempt to send
-
-    goto    PhysTx              ; ... else attempt to send data
+    btfss   STATUS,Z        ; Skip if not in an active Tx state ...
+    goto    PhysTx          ; ... else attempt to send data
 
 QuitTx
-    bsf     lnkState,LNKDIRFLG  ; Ensure link direction is Tx
-    bcf     STATUS,Z            ; Clear STATUS,Z to indicate data not sent
+    bcf     STATUS,Z        ; Clear STATUS,Z to indicate data not sent
     return
 
     endm
@@ -358,11 +355,9 @@ SyncTx      macro   lnkState
 ;**********************************************************************
 IsLinkRxTo  macro   lnkState, linkTimer
 
-    movf    lnkState,W
-    andlw   LNKSTTEMASK
-    xorlw   RXSTATE
-    btfsc   STATUS,Z        ; Skip if not in receiving data state ...
-    decf    linkTimer,W     ; ... else test link timeout timer
+    bcf     STATUS,Z            ; Cannot be timed out if not in Rx state
+    btfsc   lnkState,LNKRXFLG   ; Skip if not in receiving data state ...
+    decf    linkTimer,W         ; ... else test link timeout timer
 
     endm
 
