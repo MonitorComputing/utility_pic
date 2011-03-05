@@ -245,6 +245,42 @@ FlipToRx
 
 ;**********************************************************************
 ;                                                                     *
+; Macro:     SrvcLinkIf                                               *
+;                                                                     *
+;            Interrupt servicing of link physical interface           *
+;                                                                     *
+; Arguments: linkState  - Link's state machine state variable         *
+;            linkTimer - Rx timeout timer                             *
+;            LINKTMOUT - Delay value to timeout if no data received   *
+;            SrvcTx    - Subroutine to service physical Tx            *
+;            SrvcRx    - Subroutine to service physical Rx            *
+;                                                                     *
+;**********************************************************************
+SrvcLinkIf  macro   linkState, linkTimer, LINKTMOUT, SrvcTx, SrvcRx
+
+            local   linkNotRx
+
+    btfss   linkState,LNKRXFLG
+    goto    linkNotRx
+
+    decfsz  linkTimer,W     ; Decrement Rx timeout counter, skip if zero ...
+    movwf   linkTimer       ; ... else update the counter
+
+    call    SrvcRx          ; Service link serial reception
+    xorlw   RX_BUSY         ; Test if receiving data
+    movlw   (INTLINKTMOP + 1)
+    btfsc   STATUS,Z        ; Skip if not receiving data ...
+    movwf   linkTimer       ; ... else reload the Rx timeout counter
+
+linkNotRx
+    btfsc   linkState,LNKTXFLG
+    call    SrvcTx          ; Service link serial transmission
+
+    endm
+
+
+;**********************************************************************
+;                                                                     *
 ; Macro:     LinkRx                                                   *
 ;                                                                     *
 ;            Attempt to get an 'Rx' byte from the link                *
