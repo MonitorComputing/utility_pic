@@ -234,10 +234,8 @@ FlipToRx
     btfss   STATUS,Z        ; Skip if transmit is idle ...
     return                  ; ... else continue transmiting
 
-    movf    lnkState,W      ; Get link status
-    andlw   ~LNKSTTEMASK    ; Mask out state value
-    iorlw   SWITCH2RXSTATE  ; Next state = Switching to Rx
-    movwf   lnkState        ; Update link status
+    movlw   ~LNKSTTEMASK    ; Mask out state value
+    andwf   lnkState,F      ; Next state = Switching to Rx
     goto    State0
 
     endm
