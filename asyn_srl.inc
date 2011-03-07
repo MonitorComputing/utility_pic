@@ -131,6 +131,7 @@
 RX_BITS     EQU  9 ; 1 start (not counted), 8 data, no parity, 1 stop
 TX_BITS     EQU 10 ; 1 start, 8 data, no parity, 2 stop
 BRK_BITS    EQU 12 ; Number of bits to send for break (> TX_BITS)
+BRKSTP_BITS EQU  2 ; Number of stop bits to send at end of break
 MSB         EQU  7 ; Bit number of most significant bit
 
 RX_BUSY     EQU  0 ; Returned to indicate data being received
@@ -245,6 +246,23 @@ InitTx      macro   txStat, txTimer, txBitCount, txReg, TXFLG, TXBRK
     clrf    txReg
     bcf     txStat,TXBRK    ; Clear the send break flag
     bsf     txStat,TXFLG    ; Set Tx byte clear flag
+
+    endm
+
+
+;**********************************************************************
+;                                                                     *
+; Macro:     TxBreak                                                  *
+;                                                                     *
+;            Macro to cause transmission of a break.                  *
+;                                                                     *
+; Arguments: txStat     - Serial interface transmit status variable   *
+;            TXBRK      - Send break status bit                       *
+;                                                                     *
+;**********************************************************************
+TxBreak      macro   txStat, TXBRK
+
+    bsf     txStat,TXBRK
 
     endm
 
@@ -528,9 +546,12 @@ ContinueBreak
 
     ; Transmission complete, nothing else needs to be done
     bcf     txStat,TXBRK    ; Clear the send break flag
-    bcf     TXPORT,TXBIT    ; Clear Tx output, 'mark' (line idle)
+    clrf    txReg           ; Clear Tx data shift register
+    comf    txReg,F         ; Ones complement Tx data shift register (send 1s)
+    movlw   BRKSTP_BITS     ; Load number of ...
+    movwf   txBitCount      ; ... break stop bits to send
 
-    goto    CheckForTx      ; Check if data for transmission in Tx buffer
+    goto    TxNextBit       ; Commence sending Tx break stop bits
 
     endm
 
@@ -581,7 +602,7 @@ SerialRx    macro   rxStat, rxBffr, RXFLG
 SerialTx    macro   txStat, txBffr, TXFLG
 
     bcf     STATUS,Z        ; Set default return status of no Tx performed
-    btfss   txStat,TXFLG   ; Skip if Tx buffer clear flag is set ...
+    btfss   txStat,TXFLG    ; Skip if Tx buffer clear flag is set ...
     return                  ; ... else return (transmit buffer full)
 
     movf    FSR,W           ; Copy Tx byte into ...
