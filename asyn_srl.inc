@@ -95,6 +95,7 @@
 ;            TXBIT    - Transmit port bit to use                      *
 ;                                                                     *
 ; Switches:  SYNC_SERIAL - 'Synchronous mode', no bit timing needed   *
+;            CLKD_SERIAL - 'Clocked serial', external bit timing      *
 ;            SYNC_TXCD   - 'Tx collison detect', check last Tx bit    *
 ;                                                                     *
 ; Notes: If the macro 'SerialTx' is employed and will be interrupted  *
@@ -122,6 +123,13 @@
 ;        txTimer.                                                     *
 ;                                                                     *
 ;**********************************************************************
+
+
+#ifdef SYNC_SERIAL
+#ifndef CLKD_SERIAL
+#define CLKD_SERIAL
+#endif
+#endif
 
 
 ;**********************************************************************
@@ -324,7 +332,7 @@ BeginRx
 
 ContinueRx
     ; Reception of data is in progress
-#ifndef SYNC_SERIAL
+#ifndef CLKD_SERIAL
     ; If not performing 'synchronous' reception test if time to sample
     ; next bit of received data
     decfsz  rxTimer,W       ; Skip if bit cycle count is zero ...
@@ -371,7 +379,7 @@ Overrun
     retlw   RX_BRK          ; Return status = receiving break
 
 RxBrkBit
-#ifndef SYNC_SERIAL
+#ifndef CLKD_SERIAL
     ; If not performing 'synchronous' reception test if time to sample
     ; next bit of received data
     decfsz  rxTimer,W       ; Skip if bit cycle count is zero ...
@@ -465,7 +473,7 @@ BeginTx
 
 ContinueTx
     ; Transmission of data is in progress
-#ifndef SYNC_SERIAL
+#ifndef CLKD_SERIAL
     ; If not performing 'synchronous' transmission test if time to send
     ; next bit of transmit data
     decfsz  txTimer,W       ; Skip if bit cycle count is zero ...
