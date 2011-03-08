@@ -122,9 +122,9 @@ LNKDIRMSK      EQU  B'10000000' ; Link direction status mask
 ;            InitRx    - Subroutine to initialise physical Rx         *
 ;                                                                     *
 ;**********************************************************************
-SrvcLink    macro   lnkState, linkTimer, dlyTmr, LINKDLYRX, LINKDLYTX, LINKTMOUT, EnableTx, InitTx, IsTxIdle, TxSynch, EnableRx, InitRx
+SrvcLink    macro   lnkState, linkTimer, dlyTmr, LINKDLYRX, LINKDLYTX, LINKTMOUT, EnableTx, InitTx, SrvcTx, IsTxIdle, TxSynch, EnableRx, InitRx, SrvcRx
 
-            local   StateTable, State0, State1, State2, State3, SkipRxBreak, CheckRxDir, State4, State5, State6, State7, State8, State9, State10, CheckTxDir, GoToState10, FlipToRx
+            local   StateTable, State0, State1, State2, State3, SkipRxBreak, CheckRxDir, State4, State5, State6, State7, State8, State9, CheckTxDir, FlipToRx, SrvcLinkEnd
 
     movlw   high StateTable   ; Load jump table address high byte ...
     movwf   PCLATH            ; ... into PCLATH to make jump in same code block
@@ -146,7 +146,7 @@ StateTable
     ;  'Active' Tx states must be in the range 8 to 15
     goto    State8          ; State 8  - Waiting for interface lines to settle
     goto    State9          ; State 9  - Transmiting break
-    goto    State10         ; State 10 - Transmiting data
+
 
 #if (high StateTable) != (high $)
     error "Link service state machine split across page boundary"
@@ -163,11 +163,14 @@ State0      ; State 0 - Switching to Rx
     movwf   dlyTmr          ; Load interface settle delay
 
     incf    lnkState,F      ; Next state = Waiting for interface to settle
+    goto    SrvcLinkEnd
 
 State1      ; Waiting for interface lines to settle
 
+#ifndef CLKD_LINK
     decfsz  dlyTmr,W        ; Skip if delay expired ...
-    return                  ; ... else remain in current state
+    goto    SrvcLinkEnd     ; ... else remain in current state
+#endif
 
     MaxLw   LINKTMOUT, 1
     movwf   linkTimer       ; Reset no data received timeout
@@ -175,41 +178,52 @@ State1      ; Waiting for interface lines to settle
     bsf     lnkState,LNKRXFLG   ; Enable physical Rx
 
     incf    lnkState,F      ; Next state = Receiving data
+    goto    SrvcLinkEnd
 
 State2      ; State 2 - Receiving data
 
+    decfsz  linkTimer,W     ; Decrement Rx timeout counter, skip if zero ...
+    movwf   linkTimer       ; ... else update the counter
+
+    call    SrvcRx          ; Service link serial reception
+    xorlw   RX_BUSY         ; Test if receiving data
+    MaxLw   LINKTMOUT, 1
+    btfsc   STATUS,Z        ; Skip if not receiving data ...
+    movwf   linkTimer       ; ... else reload the Rx timeout counter
+
     btfss   lnkState,LNKDIRFLG  ; Skip if required direction is Tx ...
-    return                      ; ... else remain in current state
+    goto    SrvcLinkEnd         ; ... else continue to receive
 
     ; Need to change direction to Tx
 
     incf    lnkState,F      ; Next state = Unused
 
-State3      ; State 5 - Unused
+State3      ; State 3 - Unused
     incf    lnkState,F      ; Next state = Unused
 
-State4      ; State 5 - Unused
+State4      ; State 4 - Unused
     incf    lnkState,F      ; Next state = Unused
 
 State5      ; State 5 - Unused
-    incf    lnkState,F      ; Next state = Unused
+    incf    lnkState,F      ; Next state = Switching to Tx
+    goto    SrvcLinkEnd
 
 State6      ; State 6 - Switching to Tx
 
     bcf     lnkState,LNKRXFLG   ; Disable physical Rx (link is half duplex)
 
-    MaxLw   LINKTMOUT, 1
-    movwf   linkTimer       ; Reset link Rx idle timeout counter
-
     MaxLw   LINKDLYTX, 1
     movwf   dlyTmr          ; Load far end turn around delay
 
     incf    lnkState,F      ; Next state = Waiting for far end to turn around
+    goto    SrvcLinkEnd
 
 State7      ; State 7 - Waiting for far end to turn around
 
+#ifndef CLKD_LINK
     decfsz  dlyTmr,W        ; Skip if delay expired ...
-    return                  ; ... else remain in current state
+    goto    SrvcLinkEnd     ; ... else remain in current state
+#endif
 
     call    EnableTx        ; Enable Tx physical interface
     call    InitTx          ; Initialise physical Tx
@@ -218,54 +232,40 @@ State7      ; State 7 - Waiting for far end to turn around
     movwf   dlyTmr          ; Load interface settle delay
 
     incf    lnkState,F      ; Next state = Waiting for interface to settle
+    goto    SrvcLinkEnd
 
 State8      ; State 8 - Waiting for interface to settle
 
+#ifndef CLKD_LINK
     decfsz  dlyTmr,W        ; Skip if delay expired ...
-    return                  ; ... else remain in current state
+    goto    SrvcLinkEnd     ; ... else remain in current state
+#endif
 
     bsf     lnkState,LNKTXFLG   ; Enable physical Tx
 
-    incf    lnkState,F          ; Next state = Transmiting break
-    btfss   lnkState,LNKSYNFLG  ; Skip if synchronise required ...
-    goto    GoToState10         ; ... else jump into transmiting data state
+    incf    lnkState,F          ; Next state = Transmiting data
+    goto    SrvcLinkEnd
 
-State9      ; State 9 - Transmiting break
+State9     ; State 9 - Transmiting data
 
-    btfss   lnkState,LNKDIRFLG  ; Skip if required direction is Tx
-    goto    FlipToRx
+    call    SrvcTx          ; Service link serial transmission
+    xorlw   RX_IDLE         ; Test if transmit is idle ...
+    btfss   STATUS,Z        ; ... if so skip  ...
+    goto    SrvcLinkEnd     ; ... else finish transmiting
 
-    call    IsTxIdle
-    btfss   STATUS,Z        ; Skip if transmit is idle ...
-    return                  ; ... else finish transmiting
-
-    call    TxSynch             ; Trigger transmission synchronisation
+    btfsc   lnkState,LNKSYNFLG  ; Skip if synchronise not required ...
+    call    TxSynch             ; ... else trigger synchronise
     bcf     lnkState,LNKSYNFLG  ; Clear synchronise required flag
 
-GoToState10
-    incf    lnkState,F      ; Next state = Transmiting data
+    btfsc   lnkState,LNKDIRFLG  ; Skip if required direction is Rx
+    goto    SrvcLinkEnd         ; ... else continue transmiting
 
-State10     ; State 10 - Transmiting data
-
-    btfss   lnkState,LNKDIRFLG  ; Skip if required direction is Tx
-    goto    FlipToRx
-
-    btfss   lnkState,LNKSYNFLG  ; Skip if synchronise required ...
-    return                      ; ... else remain in current state
-
-    decf    lnkState,F          ; Next state = Transmiting break
-    goto    State9
-
-FlipToRx
-    ; Need to change direction to Rx
-
-    call    IsTxIdle
-    btfss   STATUS,Z        ; Skip if transmit is idle ...
-    return                  ; ... else finish transmiting
+    ; Change direction to Rx
 
     movlw   ~LNKSTTEMASK    ; Mask out state value
     andwf   lnkState,F      ; Next state = Switching to Rx
-    goto    State0
+
+SrvcLinkEnd
 
     endm
 
@@ -295,7 +295,7 @@ SrvcLinkIf  macro   linkState, linkTimer, LINKTMOUT, SrvcTx, SrvcRx
 
     call    SrvcRx          ; Service link serial reception
     xorlw   RX_BUSY         ; Test if receiving data
-    MaxLw   INTLINKTMOP, 1
+    MaxLw   LINKTMOUT, 1
     btfsc   STATUS,Z        ; Skip if not receiving data ...
     movwf   linkTimer       ; ... else reload the Rx timeout counter
 
