@@ -264,6 +264,7 @@ State9     ; State 9 - Transmiting data
 
     movlw   ~LNKSTTEMASK    ; Mask out state value
     andwf   lnkState,F      ; Next state = Switching to Rx
+    goto    State0
 
 SrvcLinkEnd
 
