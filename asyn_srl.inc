@@ -51,6 +51,7 @@
 ;    EnableTx - Enable transmit hardware.                             *
 ;    InitRx   - Initialise receivesoftware.                           *
 ;    InitTx   - Initialise transmit software.                         *
+;    TxBreak  - Cause transmission of a break.                        *
 ;    IsTxIdle - Test if no transmission in progress.                  *
 ;                                                                     *
 ;  These macros employ 'returns' and so their instances must be       *
@@ -59,7 +60,9 @@
 ;    ServiceRx - Service actual receptions of data.                   *
 ;    ServiceTx - Service actual transmission of data.                 *
 ;    SerialRx  - Get most recently received byte, if available.       *
+;    SrlRxInd  - Save most recently received byte, if available.      *
 ;    SerialTx  - Start transmission of byte, if transmitter not busy. *
+;    SrlTxInd  - Start transmission of byte, if transmitter not busy. *
 ;                                                                     *
 ; Each instance of a serial interface requires -                      *
 ;                                                                     *
@@ -69,14 +72,16 @@
 ;            rxTimer    - Receive timer variable                      *
 ;            rxBitCount - Receive bits counter                        *
 ;            rxReg      - Receive data shift register                 *
-;            rxBffr     - Receive data buffer                         *
+;            rxBffr     - Received data buffer (loaded from rxReg)    *
+;            RXTRIS     - Receive port direction register             *
 ;            RXPORT     - Receive port data register                  *
 ;     Transmit:                                                       *
 ;            txStat     - Transmit status variable                    *
 ;            txTimer    - Transmit timer variable                     *
 ;            txBitCount - Transmit bits counter                       *
 ;            txReg      - Transmit data shift register                *
-;            txBffr     - Transmit data buffer                        *
+;            txBffr     - Transmit data buffer (loaded into txReg)    *
+;            TXTRIS     - Transmit port direction register            *
 ;            TXPORT     - Transmit port data register                 *
 ;                                                                     *
 ; Constants:                                                          *
@@ -101,20 +106,20 @@
 ; Notes: If the macro 'SerialTx' is employed and will be interrupted  *
 ;        the interrupt code must preserve the contents of the FSR     *
 ;        register.                                                    *
-;        If operating half duplex the same registers and status bits  *
-;        can be used for both Rx and Tx (rxStat == TxStat). Also as   *
-;        there are only four status bits so two interfaces can share  *
-;        the same status variable.                                    *
 ;        If an interface is running half duplex the following         *
 ;        constants and variables can be equated in order to reduce    *
 ;        memory use,                                                  *
 ;                                                                     *
 ;            RXFLG      == TXFLG                                      *
 ;            RXBRK      == TXBRK                                      *
+;            rxStat     == txStat                                     *
 ;            rxTimer    == txTimer                                    *
 ;            rxBitCount == txBitCount                                 *
 ;            rxReg      == txReg                                      *
 ;            rxBffr     == txBffr                                     *
+;                                                                     *
+;        Also as there are only four status bits so two interfaces    *
+;        can share the same status variable.                          *
 ;                                                                     *
 ;        If an interface is operating in synchronous mode,            *
 ;        i.e. SYNC_SERIAL defined when macros instanced, then the     *
@@ -195,6 +200,37 @@ EnableTx    macro   TXTRIS, TXPORT, TXBIT
 
 ;**********************************************************************
 ;                                                                     *
+; Macro:     AcquireTx                                                *
+;                                                                     *
+;            Macro to acquire serial transmit physical interface.     *
+;                                                                     *
+; Arguments: TXTRIS - Transmit port direction register                *
+;            TXPORT - Transmit port data register                     *
+;            TXBIT  - Transmit port bit to use                        *
+;                                                                     *
+; Returns  : STATUS,Z - Set if Tx interface acquired, clear if not    *
+;                                                                     *
+;**********************************************************************
+AcquireTx   macro   TXTRIS, TXPORT, TXBIT
+
+    bcf     STATUS,Z        ; Set default return status of Tx not acquired
+
+    btfss   TXPORT,TXBIT    ; Skip if Tx 'space' ...
+    return                  ; ... otherwise return
+
+    bcf     TXPORT,TXBIT    ; Clear Tx output, 'mark' (line idle)
+    BANKSEL OPTION_REG
+    bcf     TXTRIS,TXBIT    ; Set direction of Tx bit as output
+    BANKSEL TMR0
+
+    bsf     STATUS,Z        ; Return status = 'Tx interface acquired'
+    return                  ; Return
+
+    endm
+
+
+;**********************************************************************
+;                                                                     *
 ; Macro:     InitRx                                                   *
 ;                                                                     *
 ;            Macro to initialise serial interface receive variables.  *
@@ -206,7 +242,7 @@ EnableTx    macro   TXTRIS, TXPORT, TXBIT
 ;            RXFLG      - Receive buffer full status bit              *
 ;            RXERR      - Receive error status bit                    *
 ;            RXBRK      - Received break status bit                   *
-;            RXBRK      - Seeking stop bit status bit                 *
+;            RXSTOP     - Seeking stop bit status bit                 *
 ;                                                                     *
 ;**********************************************************************
 InitRx      macro   rxStat, rxTimer, rxBitCount, rxReg, RXFLG, RXERR, RXBRK , RXSTOP
@@ -240,7 +276,7 @@ InitRx      macro   rxStat, rxTimer, rxBitCount, rxReg, RXFLG, RXERR, RXBRK , RX
 ;            txTimer    - Transmit timer variable                     *
 ;            txBitCount - Transmit bits counter                       *
 ;            txReg      - Transmit data shift register                *
-;            TXFLG     - Transmit buffer clear status bit             *
+;            TXFLG      - Transmit buffer clear status bit            *
 ;            TXBRK      - Send break status bit                       *
 ;                                                                     *
 ;**********************************************************************
@@ -285,7 +321,7 @@ TxBreak      macro   txStat, TXBRK
 ;            rxTimer    - Receive timer variable                      *
 ;            rxBitCount - Receive bits counter                        *
 ;            rxReg      - Receive data shift register                 *
-;            rxBffr     - Receive data buffer                         *
+;            rxBffr     - Received data buffer (loaded from rxReg)    *
 ;            RXPORT     - Receive port data register                  *
 ;            RXBIT      - Receive port bit to use                     *
 ;            CYCRXINI   - Number of cycles per bit for first bit      *
@@ -420,7 +456,7 @@ RxDataBit
 ;            txTimer    - Transmit timer variable                     *
 ;            txBitCount - Transmit bits counter                       *
 ;            txReg      - Transmit data shift register                *
-;            txBffr     - Transmit data buffer                        *
+;            txBffr     - Transmit data buffer (loaded into txReg)    *
 ;            TXPORT     - Transmit port data register                 *
 ;            TXBIT      - Transmit port bit to use                    *
 ;     The next two are only used if Tx collision detection enabled    *
@@ -571,7 +607,7 @@ ContinueBreak
 ;            Attempt to get an 'Rx' byte from the serial interface.   *
 ;                                                                     *
 ; Arguments: rxStat - Receive status variable                         *
-;            rxBffr - Receive data buffer                             *
+;            rxBffr - Received data buffer (loaded from rxReg)        *
 ;            RXFLG  - Receive buffer full status bit                  *
 ;                                                                     *
 ; Returns  : STATUS,Z - Set if got byte, clear if not                 *
@@ -588,6 +624,37 @@ SerialRx    macro   rxStat, rxBffr, RXFLG
     movf    rxBffr,W        ; Load W from the Rx buffer
     bcf     rxStat,RXFLG    ; Clear the Rx buffer full flag
     bsf     STATUS,Z        ; Return status = 'Rx data available in W'
+    return                  ; Return
+
+    endm
+
+
+;**********************************************************************
+;                                                                     *
+; Macro:     SrlRxInd                                                 *
+;                                                                     *
+;            Attempt to get an 'Rx' byte from the serial interface.   *
+;                                                                     *
+; Arguments: FSR    - Address for recieved byte                       *
+;            rxStat - Receive status variable                         *
+;            rxBffr - Received data buffer (loaded from rxReg)        *
+;            RXFLG  - Receive buffer full status bit                  *
+;                                                                     *
+; Returns  : STATUS,Z - Set if got byte, clear if not                 *
+;            @FSR     - Rx byte, if any                               *
+;                                                                     *
+;**********************************************************************
+SrlRxInd    macro   rxStat, rxBffr, RXFLG
+
+    bcf     STATUS,Z        ; Set default return status of no Rx data
+
+    btfss   rxStat,RXFLG    ; Skip if Rx buffer full flag is set ...
+    return                  ; ... else return (receive buffer empty)
+
+    movf    rxBffr,W        ; Load W from the Rx buffer
+    movwf   INDF            ; Save byte from the Rx buffer
+    bcf     rxStat,RXFLG    ; Clear the Rx buffer full flag
+    bsf     STATUS,Z        ; Return status = 'Rx data saved'
     return                  ; Return
 
     endm
@@ -614,6 +681,35 @@ SerialTx    macro   txStat, txBffr, TXFLG
     return                  ; ... else return (transmit buffer full)
 
     movf    FSR,W           ; Copy Tx byte into ...
+    movwf   txBffr          ; ... Tx buffer
+    bcf     txStat,TXFLG    ; Clear the Tx byte clear flag
+    bsf     STATUS,Z        ; Return status = 'Tx data sent'
+    return                  ; Return
+
+    endm
+
+
+;**********************************************************************
+;                                                                     *
+; Macro:     SrlTxInd                                                 *
+;                                                                     *
+;            Attempt to send a 'Tx' byte to the serial interface.     *
+;                                                                     *
+; Arguments: FSR    - Address of byte to send                         *
+;            txStat - Transmit status variable                        *
+;            txBffr - Transmit data buffer                            *
+;            TXFLG  - Transmit buffer clear status bit                *
+;                                                                     *
+; Returns  : STATUS,Z - Set if sent byte, clear if not                *
+;                                                                     *
+;**********************************************************************
+SrlTxInd    macro   txStat, txBffr, TXFLG
+
+    bcf     STATUS,Z        ; Set default return status of no Tx performed
+    btfss   txStat,TXFLG    ; Skip if Tx buffer clear flag is set ...
+    return                  ; ... else return (transmit buffer full)
+
+    movf    INDF,W          ; Copy Tx byte into ...
     movwf   txBffr          ; ... Tx buffer
     bcf     txStat,TXFLG    ; Clear the Tx byte clear flag
     bsf     STATUS,Z        ; Return status = 'Tx data sent'
