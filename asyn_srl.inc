@@ -142,7 +142,7 @@
 ;**********************************************************************
 
 RX_BITS     EQU  9 ; 1 start (not counted), 8 data, no parity, 1 stop
-TX_BITS     EQU  9 ; 1 start, 8 data, no parity, 1 stop
+TX_BITS     EQU 10 ; 1 start, 8 data, no parity, 1 stop
 BRK_BITS    EQU 12 ; Number of bits to send for break (> TX_BITS)
 BRKSTP_BITS EQU  2 ; Number of stop bits to send at end of break
 MSB         EQU  7 ; Bit number of most significant bit
