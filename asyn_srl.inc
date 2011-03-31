@@ -142,7 +142,7 @@
 ;**********************************************************************
 
 RX_BITS     EQU  9 ; 1 start (not counted), 8 data, no parity, 1 stop
-TX_BITS     EQU 10 ; 1 start, 8 data, no parity, 2 stop
+TX_BITS     EQU  9 ; 1 start, 8 data, no parity, 1 stop
 BRK_BITS    EQU 12 ; Number of bits to send for break (> TX_BITS)
 BRKSTP_BITS EQU  2 ; Number of stop bits to send at end of break
 MSB         EQU  7 ; Bit number of most significant bit
@@ -543,7 +543,7 @@ TxNextBit
     btfss   STATUS,Z        ; Skip if Rx input and Tx output match ...
     movlw   TX_CLSN         ; ... else returned status = collision
 #endif
-    ; Send next bit of received data.  This is done by shifting the
+    ; Send next bit of transmit data.  This is done by shifting the
     ; transmit data register one bit to the right, 'most significant bit'
     ; to 'least significant bit', using the carry flag to ensure the 'most
     ; significant bit' is set after the shift (ensures that after sending
