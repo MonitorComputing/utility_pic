@@ -1,10 +1,12 @@
+#ifndef    LINK_HD_INC
+#define    LINK_HD_INC
     nolist
 
 ; $Id$
 
 ;**********************************************************************
 ;                                                                     *
-;    Description:   Half duplex Bod data link macros.                 *
+;    Description:   Half duplex data link macros.                     *
 ;                                                                     *
 ;    Author:        Chris White (whitecf@bcs.org.uk)                  *
 ;    Company:       Monitor Computing Services Ltd.                   *
@@ -124,7 +126,13 @@ LNKDIRMSK      EQU  B'10000000' ; Link direction status mask
 ;**********************************************************************
 SrvcLink    macro   lnkState, linkTimer, dlyTmr, LINKDLYRX, LINKDLYTX, LINKTMOUT, EnableTx, InitTx, SrvcTx, IsTxIdle, TxSynch, EnableRx, InitRx, SrvcRx
 
-            local   StateTable, State0, State1, State2, State3, SkipRxBreak, CheckRxDir, State4, State5, State6, State7, State8, State9, CheckTxDir, FlipToRx, SrvcLinkEnd
+            local   StateTable, State0, State1, State2, State3, SkipRxBreak, CheckRxDir, State4, State5, State6, State7, State8, State9, CheckTxDir, FlipToRx, SkipSrvcLink, SrvcLinkEnd
+
+#ifndef CLKD_LINK
+    decf    dlyTmr,W        ; Decrement timing counter
+    btfss   STATUS,Z        ; Skip if zero ...
+    goto    SkipSrvcLink    ; ... else skip servicing the link
+#endif
 
     movlw   high StateTable   ; Load jump table address high byte ...
     movwf   PCLATH            ; ... into PCLATH to make jump in same code block
@@ -166,11 +174,6 @@ State0      ; State 0 - Switching to Rx
     goto    SrvcLinkEnd
 
 State1      ; Waiting for interface lines to settle
-
-#ifndef CLKD_LINK
-    decfsz  dlyTmr,W        ; Skip if delay expired ...
-    goto    SrvcLinkEnd     ; ... else remain in current state
-#endif
 
     MaxLw   LINKTMOUT, 1
     movwf   linkTimer       ; Reset no data received timeout
@@ -220,11 +223,6 @@ State6      ; State 6 - Switching to Tx
 
 State7      ; State 7 - Waiting for far end to turn around
 
-#ifndef CLKD_LINK
-    decfsz  dlyTmr,W        ; Skip if delay expired ...
-    goto    SrvcLinkEnd     ; ... else remain in current state
-#endif
-
     call    EnableTx        ; Enable Tx physical interface
     call    InitTx          ; Initialise physical Tx
 
@@ -235,11 +233,6 @@ State7      ; State 7 - Waiting for far end to turn around
     goto    SrvcLinkEnd
 
 State8      ; State 8 - Waiting for interface to settle
-
-#ifndef CLKD_LINK
-    decfsz  dlyTmr,W        ; Skip if delay expired ...
-    goto    SrvcLinkEnd     ; ... else remain in current state
-#endif
 
     bsf     lnkState,LNKTXFLG   ; Enable physical Tx
 
@@ -266,43 +259,12 @@ State9     ; State 9 - Transmiting data
     andwf   lnkState,F      ; Next state = Switching to Rx
     goto    State0
 
+SkipSrvcLink
+#ifndef CLKD_LINK
+    movwf   dlyTmr          ; Update timing counter
+#endif
+
 SrvcLinkEnd
-
-    endm
-
-
-;**********************************************************************
-;                                                                     *
-; Macro:     SrvcLinkIf                                               *
-;                                                                     *
-;            Interrupt servicing of link physical interface           *
-;                                                                     *
-; Arguments: linkState  - Link's state machine state variable         *
-;            linkTimer - Rx timeout timer                             *
-;            LINKTMOUT - Delay value to timeout if no data received   *
-;            SrvcTx    - Subroutine to service physical Tx            *
-;            SrvcRx    - Subroutine to service physical Rx            *
-;                                                                     *
-;**********************************************************************
-SrvcLinkIf  macro   linkState, linkTimer, LINKTMOUT, SrvcTx, SrvcRx
-
-            local   LinkNotRx
-
-    btfss   linkState,LNKRXFLG
-    goto    LinkNotRx
-
-    decfsz  linkTimer,W     ; Decrement Rx timeout counter, skip if zero ...
-    movwf   linkTimer       ; ... else update the counter
-
-    call    SrvcRx          ; Service link serial reception
-    xorlw   RX_BUSY         ; Test if receiving data
-    MaxLw   LINKTMOUT, 1
-    btfsc   STATUS,Z        ; Skip if not receiving data ...
-    movwf   linkTimer       ; ... else reload the Rx timeout counter
-
-LinkNotRx
-    btfsc   linkState,LNKTXFLG
-    call    SrvcTx          ; Service link serial transmission
 
     endm
 
@@ -426,4 +388,4 @@ IsLinkRxTo  macro   lnkState, linkTimer
     endm
 
     list
-
+#endif
