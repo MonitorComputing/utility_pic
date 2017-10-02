@@ -2,8 +2,6 @@
 #define    LINK_HD_INC
     nolist
 
-; $Id$
-
 ;**********************************************************************
 ;                                                                     *
 ;    Description:   Half duplex data link macros.                     *

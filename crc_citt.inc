@@ -2,8 +2,6 @@
 #define    CRC_CITT_INC
         nolist
 
-; $Id$
-
 ;**********************************************************************
 ;                                                                     *
 ; Description: Macros to implement byte at a time ^16+^12+^5+1,       *

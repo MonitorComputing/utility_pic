@@ -1,7 +1,5 @@
     nolist
 
-; $Id$
-
 ;**********************************************************************
 ;                                                                     *
 ; Description: Macros to implement asynchronous (or synchronous if    *
