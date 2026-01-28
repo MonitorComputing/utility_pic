@@ -1,39 +1,22 @@
+    nolist
+#ifndef    EEPROM_INC
+#define    EEPROM_INC
+
 ;**********************************************************************
 ;                                                                     *
-;    Filename:      eeprom.inc                                        *
-;    Date:          19 Jun 2008                                       *
-;    File Version:  1                                                 *
+; Description: Utility functions to read and write EEPROM data.       *
+;              Always return with register bank 0 selected regardless *
+;              of current selection when invoked.                     *
 ;                                                                     *
-;    Author:        Chris White (whitecf@bcs.org.uk)                 *
-;    Company:       Monitor Computing Services Ltd.                   *
+; Author: Chris White (whitecf69@gmail.com)                           *
 ;                                                                     *
-;**********************************************************************
+; Copyright (C) 2008 by Monitor Computing Services Limited, licensed  *
+; under CC BY-NC-SA 4.0. To view a copy of this license, visit        *
+; https://creativecommons.org/licenses/by-nc-sa/4.0/                  *
 ;                                                                     *
-;    Copyright (C) 2008  Monitor Computing Services Ltd.              *
-;                                                                     *
-;    This program is free software; you can redistribute it and/or    *
-;    modify it under the terms of the GNU General Public License      *
-;    as published by the Free Software Foundation; either version 2   *
-;    of the License, or any later version.                            *
-;                                                                     *
-;    This program is distributed in the hope that it will be useful,  *
-;    but WITHOUT ANY WARRANTY; without even the implied warranty of   *
-;    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the    *
-;    GNU General Public License for more details.                     *
-;                                                                     *
-;    You should have received a copy of the GNU General Public        *
-;    License (http://www.gnu.org/copyleft/gpl.html) along with this   *
-;    program; if not, write to:                                       *
-;       The Free Software Foundation Inc.,                            *
-;       59 Temple Place - Suite 330,                                  *
-;       Boston, MA  02111-1307,                                       *
-;       USA.                                                          *
-;                                                                     *
-;**********************************************************************
-;                                                                     *
-;    Notes: Utility functions to read and write EEPROM data.          *
-;           Always return with register bank 0 selected regardless of *
-;           current selection when invoked.                           *
+; This program is distributed in the hope that it will be useful, but *
+; WITHOUT ANY WARRANTY; without even the implied warranty of          *
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.                *
 ;                                                                     *
 ;**********************************************************************
 
@@ -93,3 +76,6 @@ GetEEPROM
 
         BANKSEL 0                 ; Select register page 0
         return
+
+#endif
+    list

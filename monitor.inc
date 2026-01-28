@@ -1,71 +1,58 @@
         nolist
+#ifndef    ASYN_SRL_INC
+#define    ASYN_SRL_INC
 
 ;**********************************************************************
 ;                                                                     *
-;    Filename:      monitor.inc                                       *
-;    Date:          16 Mar 2001                                       *
-;    File Version:  9                                                 *
+; Description: Simple low level monitor program offering terminal     *
+;              interface via a Bod link API conformant link ('up'     *
+;              link)                                                  *
 ;                                                                     *
-;    Author:        Chris White (whitecf@bcs.org.uk)                 *
-;    Company:       Monitor Computing Services Ltd.                   *
+;              Requires the use to have defined the following:        *
 ;                                                                     *
-;**********************************************************************
+;                BootVector - address to 'goto' to reboot system      *
+;                UserInt  - routine to perform 'User' interrupt       *
+;                           functions (extra to basic ISR             *
+;                           functionality)                            *
+;                LinkMRx  - routine to receive data ('up' link)       *
+;                LinkMTx  - routine to transmit data ('up' link)      *
+;                UserInit - routine to perform 'User' initialisation  *
+;                           functions (extra to processor reset)      *
+;                UserMain - routine to perform 'User' main functions  *
 ;                                                                     *
-;    Copyright (C) 2001  Monitor Computing Services Ltd.              *
+;              If EEDATA is not defined then EEPROM commands are not  *
+;              available to the user.                                 *
+;              If ADRES is not defined then A/D commands are not      *
+;              available to the user.                                 *
+;              If A/D commands are to be used then ADTRACKTIME must   *
+;              be defined in order to time the A/D sample settleing   *
+;              delay.                                                 *
+;              If NOMONBANNER is defined then start up banner and     *
+;              prompt are not displayed (this would be used in a      *
+;              daisy chain for nodes other than the head of the       *
+;              chain).                                                *
+;              If MONUSERON is defined then the monitor will          *
+;              initialise with 'user processing' enabled (default is  *
+;              disabled).                                             *
+;              If LinkHTx is defined then the 'hop' feature is        *
+;              available. This allows a daisy chain to be built in    *
+;              which each node can be made to 'hop' the interface to  *
+;              the next node in the chain.  When 'hop' is in effect   *
+;              the prompt presented o the user indicates the number   *
+;              of 'hops' in place.  If 'hop' mode is to be used the   *
+;              following must be defined:                             *
+;                  LinkHRx  - routine to receive data ('down' link)   *
+;                  LinkHTx  - routine to transmit data ('down' link)  *
 ;                                                                     *
-;    This program is free software; you can redistribute it and/or    *
-;    modify it under the terms of the GNU General Public License      *
-;    as published by the Free Software Foundation; either version 2   *
-;    of the License, or any later version.                            *
+; Author: Chris White (whitecf69@gmail.com)                           *
 ;                                                                     *
-;    This program is distributed in the hope that it will be useful,  *
-;    but WITHOUT ANY WARRANTY; without even the implied warranty of   *
-;    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the    *
-;    GNU General Public License for more details.                     *
+; Copyright (C) 2001 by Monitor Computing Services Limited, licensed  *
+; under CC BY-NC-SA 4.0. To view a copy of this license, visit        *
+; https://creativecommons.org/licenses/by-nc-sa/4.0/                  *
 ;                                                                     *
-;    You should have received a copy of the GNU General Public        *
-;    License (http://www.gnu.org/copyleft/gpl.html) along with this   *
-;    program; if not, write to:                                       *
-;       The Free Software Foundation Inc.,                            *
-;       59 Temple Place - Suite 330,                                  *
-;       Boston, MA  02111-1307,                                       *
-;       USA.                                                          *
-;                                                                     *
-;**********************************************************************
-;                                                                     *
-;    Notes: Simple low level monitor program offering terminal        *
-;           interface via a Bod link API conformant link ('up' link)  *
-;                                                                     *
-;           Requires the use to have defined the following:           *
-;                                                                     *
-;             BootVector - address to 'goto' to reboot system         *
-;             UserInt  - routine to perform 'User' interrupt          *
-;                        functions (extra to basic ISR functionality) *
-;             LinkMRx  - routine to receive data ('up' link)          *
-;             LinkMTx  - routine to transmit data ('up' link)         *
-;             UserInit - routine to perform 'User' initialisation     *
-;                        functions (extra to processor reset)         *
-;             UserMain - routine to perform 'User' main functions     *
-;                                                                     *
-;           If EEDATA is not defined then EEPROM commands are not     *
-;           available to the user.                                    *
-;           If ADRES is not defined then A/D commands are not         *
-;           available to the user.                                    *
-;           If A/D commands are to be used then ADTRACKTIME must be   *
-;           defined in order to time the A/D sample settleing delay.  *
-;           If NOMONBANNER is defined then start up banner and prompt *
-;           are not displayed (this would be used in a daisy chain    *
-;           for nodes other than the head of the chain).              *
-;           If MONUSERON is defined then the monitor will initialise  *
-;           with 'user processing' enabled (default is disabled).     *
-;           If LinkHTx is defined then the 'hop' feature is available.*
-;           This allows a daisy chain to be built in which each node  *
-;           can be made to 'hop' the interface to the next node in    *
-;           the chain.  When 'hop' is in effect the prompt presented  *
-;           to the user indicates the number of 'hops' in place.  If  *
-;           'hop' mode is to be used the following must be defined:   *
-;             LinkHRx  - routine to receive data ('down' link)        *
-;             LinkHTx  - routine to transmit data ('down' link)       *
+; This program is distributed in the hope that it will be useful, but *
+; WITHOUT ANY WARRANTY; without even the implied warranty of          *
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.                *
 ;                                                                     *
 ;**********************************************************************
 
@@ -866,7 +853,7 @@ TxBanner    movlw   crCode
         call    TxLoop
         movlw   'd'
         call    TxLoop
-        movlw   ' ' 
+        movlw   ' '
         call    TxLoop
         movlw   'M'
         call    TxLoop
@@ -937,5 +924,5 @@ MonitorLoop     ; Top of main processing loop
         goto    MonitorLoop       ; End of main processing loop
 
 
+#endif
         list
-

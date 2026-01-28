@@ -1,4 +1,6 @@
     nolist
+#ifndef    ASYN_SRL_INC
+#define    ASYN_SRL_INC
 
 ;**********************************************************************
 ;                                                                     *
@@ -6,7 +8,7 @@
 ;              SYNC_SERIAL is defined), byte orientated (1 start,     *
 ;              8 data, no parity, 1 stop) serial interface.           *
 ;              Actual reception and transmission is achieved by       *
-;              'service' subroutines.  Except when synchronous        *
+;              'service' subroutines. Except when synchronous         *
 ;              exchange is taking place these will be called more     *
 ;              than once for each bit, i.e. if called as part of a    *
 ;              10 KHz interrupt and running at 5K baud each routine   *
@@ -15,30 +17,15 @@
 ;              significant bit' first, 0 equals line high, and 1      *
 ;              equals line low.                                       *
 ;                                                                     *
-;    Author:   Chris White (whitecf@bcs.org.uk)                       *
-;    Company:  Monitor Computing Services Ltd.                        *
+; Author: Chris White (whitecf69@gmail.com)                           *
 ;                                                                     *
-;**********************************************************************
+; Copyright (C) 2011 by Monitor Computing Services Limited, licensed  *
+; under CC BY-NC-SA 4.0. To view a copy of this license, visit        *
+; https://creativecommons.org/licenses/by-nc-sa/4.0/                  *
 ;                                                                     *
-;    Copyright (C) 2011  Monitor Computing Services Ltd.              *
-;                                                                     *
-;    This program is free software; you can redistribute it and/or    *
-;    modify it under the terms of the GNU General Public License      *
-;    as published by the Free Software Foundation; either version 2   *
-;    of the License, or any later version.                            *
-;                                                                     *
-;    This program is distributed in the hope that it will be useful,  *
-;    but WITHOUT ANY WARRANTY; without even the implied warranty of   *
-;    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the    *
-;    GNU General Public License for more details.                     *
-;                                                                     *
-;    You should have received a copy of the GNU General Public        *
-;    License (http://www.gnu.org/copyleft/gpl.html) along with this   *
-;    program; if not, write to:                                       *
-;       The Free Software Foundation Inc.,                            *
-;       59 Temple Place - Suite 330,                                  *
-;       Boston, MA  02111-1307,                                       *
-;       USA.                                                          *
+; This program is distributed in the hope that it will be useful, but *
+; WITHOUT ANY WARRANTY; without even the implied warranty of          *
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.                *
 ;                                                                     *
 ;**********************************************************************
 ;                                                                     *
@@ -578,7 +565,7 @@ BeginBreak
     ; cycles is just number of break bits
     movlw   BRK_BITS
 #endif
-    movwf   txBitCount      ; Set number of cycles to send break 
+    movwf   txBitCount      ; Set number of cycles to send break
     retlw   TX_BUSY         ; Return status = transmitting
 
 ContinueBreak
@@ -734,5 +721,5 @@ IsTxIdle    macro   txBitCount
     endm
 
 
+#endif
     list
-
